@@ -10,7 +10,10 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
+// Channel to queue messages to be sent to MQTT broker
 var mqttCh = make(chan interface{}, 2000)
+
+// Data structures for MQTT JSON payloads
 
 type mqttDeviceDataEnt struct {
 	Time        string `json:"time"`
@@ -91,6 +94,7 @@ type mqttMonitorDataEnt struct {
 	Process int     `json:"process"`
 }
 
+// startMQTT initializes the MQTT client and starts a loop to publish queued messages.
 func startMQTT(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 	if mqttDst == "" {
@@ -104,6 +108,7 @@ func startMQTT(ctx context.Context, wg *sync.WaitGroup) {
 		broker += ":1883"
 	}
 	log.Printf("start mqtt broker=%s", broker)
+	
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(broker)
 	if mqttUser != "" && mqttPassword != "" {
@@ -116,12 +121,14 @@ func startMQTT(ctx context.Context, wg *sync.WaitGroup) {
 		opts.OnConnect = connectHandler
 		opts.OnConnectionLost = connectLostHandler
 	}
+	
 	client := mqtt.NewClient(opts)
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
 		log.Println(token.Error())
 		return
 	}
 	defer client.Disconnect(250)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -138,6 +145,7 @@ func startMQTT(ctx context.Context, wg *sync.WaitGroup) {
 	}
 }
 
+// getMqttTopic returns the appropriate sub-topic based on the message type.
 func getMqttTopic(msg interface{}) string {
 	r := mqttTopic
 	switch msg.(type) {
@@ -159,6 +167,7 @@ func getMqttTopic(msg interface{}) string {
 	return r
 }
 
+// makeMqttData marshals the message into a JSON string.
 func makeMqttData(msg interface{}) string {
 	if j, err := json.Marshal(msg); err == nil {
 		return string(j)
@@ -166,6 +175,7 @@ func makeMqttData(msg interface{}) string {
 	return ""
 }
 
+// publishMQTT queues a message to be published to the MQTT broker.
 func publishMQTT(msg interface{}) {
 	if mqttDst == "" {
 		return

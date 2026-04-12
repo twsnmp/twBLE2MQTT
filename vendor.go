@@ -11,6 +11,8 @@ import (
 	"strings"
 )
 
+// makeCodeToVendor reads a CSV from company_identifiers.csv (Decimal, Hex, Company)
+// and prints a Go map entry for codeToVendorMap.
 func makeCodeToVendor() {
 	f, err := os.Open(codeToVendor)
 	if err != nil {
@@ -28,7 +30,6 @@ func makeCodeToVendor() {
 		if len(record) != 3 || record[0] == "Decimal" {
 			continue
 		}
-		//		fmt.Println(record)
 		if c, err := strconv.ParseInt(record[0], 10, 16); err == nil {
 			vendor := record[2]
 			vendor = strings.ReplaceAll(vendor, ",", ".")
@@ -41,6 +42,8 @@ func makeCodeToVendor() {
 	}
 }
 
+// makeAddressToVendor reads a CSV from ieee-oui.csv
+// and prints a Go map entry for ouiMap.
 func makeAddressToVendor() {
 	f, err := os.Open(addrToVendor)
 	if err != nil {
@@ -75,6 +78,7 @@ func makeAddressToVendor() {
 	}
 }
 
+// getVendorFromAddress returns the vendor name associated with the MAC address OUI.
 func getVendorFromAddress(mac string) string {
 	if mac == "" {
 		return ""
@@ -84,12 +88,14 @@ func getVendorFromAddress(mac string) string {
 	mac = strings.ReplaceAll(mac, "-", "")
 	if len(mac) > 6 {
 		mac = strings.ToUpper(mac)
+		// Check the first 3 bytes (6 hex chars)
 		if n, ok := ouiMap[mac[:6]]; ok {
 			return n
 		}
+		// Handle locally administered addresses
 		if h, err := hex.DecodeString(mac); err == nil {
 			if (h[0] & 0x02) == 0x02 {
-				h[0] = h[0] & 0xfd
+				h[0] = h[0] & 0xfd // Flip back to check if it was derived from a known OUI
 				mac = strings.ToUpper(hex.EncodeToString(h))
 				if n, ok := ouiMap[mac[:6]]; ok {
 					return n + "(Local)"
@@ -102,6 +108,7 @@ func getVendorFromAddress(mac string) string {
 
 }
 
+// Map of 3-byte OUI (hex string) to vendor names.
 var ouiMap = map[string]string{
 	"7404F0": "Mobiwire Mobiles",
 	"00134F": "Rapidus Wireless Networks",
@@ -30840,6 +30847,7 @@ var ouiMap = map[string]string{
 	"CC187B": "Manzanita Systems.",
 }
 
+// Map of 2-byte manufacturer codes to vendor names.
 var codeToVendorMap = map[uint16]string{
 	0x0aa3: "DIC",
 	0x0aa2: "Care Bloom",

@@ -12,24 +12,26 @@ import (
 	"tinygo.org/x/bluetooth"
 )
 
+// BluetoothDeviceEnt represents a discovered Bluetooth device and its metadata.
 type BluetoothDeviceEnt struct {
-	Address     string
-	AddressType string
-	Name        string
-	FixedAddr   bool
-	MinRSSI     int
-	MaxRSSI     int
-	RSSI        int
-	Info        string
-	Count       int
-	Code        uint16
-	SBType      uint8
-	EnvData     []byte
-	UUIDMap     map[string]bool
-	FirstTime   int64
-	LastTime    int64
+	Address     string          // MAC address
+	AddressType string          // public or random
+	Name        string          // Local name of the device
+	FixedAddr   bool            // True if the address is not random
+	MinRSSI     int             // Minimum RSSI observed
+	MaxRSSI     int             // Maximum RSSI observed
+	RSSI        int             // Current RSSI
+	Info        string          // Additional info from flags (e.g., LE Limited)
+	Count       int             // Number of times the device was seen in the current interval
+	Code        uint16          // Manufacturer code
+	SBType      uint8           // SwitchBot specific type
+	EnvData     []byte          // Raw environmental data (sensor readings)
+	UUIDMap     map[string]bool // Set of service UUIDs discovered
+	FirstTime   int64           // Timestamp of first discovery
+	LastTime    int64           // Timestamp of last discovery
 }
 
+// String returns a formatted string representation of the Bluetooth device for logging/syslog.
 func (d *BluetoothDeviceEnt) String() string {
 	return fmt.Sprintf("type=Device,address=%s,name=%s,rssi=%d,min=%d,max=%d,addrType=%s,vendor=%s,info=%s,uuid=%s,ft=%s,lt=%s",
 		d.Address, d.Name, d.RSSI, d.MinRSSI, d.MaxRSSI,
@@ -39,22 +41,23 @@ func (d *BluetoothDeviceEnt) String() string {
 	)
 }
 
-var deviceMap sync.Map
-var total = 0
-var skip = 0
+var deviceMap sync.Map // Map of MAC address to *BluetoothDeviceEnt
+var total = 0         // Total number of scan results processed
+var skip = 0          // Number of scan results skipped due to invalid RSSI
 
+// MotionSensorEnt represents a SwitchBot motion sensor state.
 type MotionSensorEnt struct {
-	Address      string
-	Moving       bool
-	LastMove     int64
-	LastMoveDiff int64
-	Battery      int
-	Light        bool
+	Address      string // MAC address
+	Moving       bool   // Current motion status
+	LastMove     int64  // Timestamp of last detected motion
+	LastMoveDiff int64  // Time since last motion (from sensor data)
+	Battery      int    // Battery level (%)
+	Light        bool   // Ambient light status (true if bright)
 }
 
-var motionSensorMap sync.Map
+var motionSensorMap sync.Map // Map of MAC address to *MotionSensorEnt
 
-// startBlueScan : start scan
+// startBlueScan initializes the Bluetooth adapter and starts the discovery process.
 func startBlueScan(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 	a := bluetooth.DefaultAdapter
@@ -65,6 +68,7 @@ func startBlueScan(ctx context.Context, wg *sync.WaitGroup) {
 	timer := time.NewTicker(time.Second * time.Duration(syslogInterval))
 	defer timer.Stop()
 
+	// Periodic reporting and monitor task
 	go func() {
 		for {
 			select {
@@ -79,6 +83,7 @@ func startBlueScan(ctx context.Context, wg *sync.WaitGroup) {
 		}
 	}()
 
+	// Start scanning
 	err := a.Scan(func(adapter *bluetooth.Adapter, result bluetooth.ScanResult) {
 		checkBlueDevice(result)
 	})
@@ -87,6 +92,7 @@ func startBlueScan(ctx context.Context, wg *sync.WaitGroup) {
 	}
 }
 
+// checkBlueDevice processes a single scan result and updates the device map.
 func checkBlueDevice(r bluetooth.ScanResult) {
 	rssi := int(r.RSSI)
 	if rssi == 0 || rssi == 127 {
@@ -113,6 +119,7 @@ func checkBlueDevice(r bluetooth.ScanResult) {
 			deviceMap.Delete(addr)
 		}
 	}
+	// New device discovered
 	d := &BluetoothDeviceEnt{
 		Address:   addr,
 		RSSI:      rssi,
@@ -127,6 +134,7 @@ func checkBlueDevice(r bluetooth.ScanResult) {
 	deviceMap.Store(addr, d)
 }
 
+// getVendor returns the vendor name based on manufacturer code or MAC address.
 func getVendor(d *BluetoothDeviceEnt) string {
 	if d.Code != 0x0000 {
 		if v, ok := codeToVendorMap[d.Code]; ok {
@@ -136,6 +144,8 @@ func getVendor(d *BluetoothDeviceEnt) string {
 	return getVendorFromAddress(d.Address)
 }
 
+// checkDeviceInfo parses scan result data (LocalName, UUIDs, ManufacturerData, ServiceData)
+// and updates the BluetoothDeviceEnt. It also handles specific sensor data parsing.
 func checkDeviceInfo(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 	if d.AddressType == "" {
 		setAddrType(d, r.Address)
@@ -149,6 +159,7 @@ func checkDeviceInfo(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 		d.UUIDMap[u.String()] = true
 	}
 
+	// Parse Manufacturer Specific Data
 	for _, md := range r.ManufacturerData() {
 		code := md.CompanyID
 		data := md.Data
@@ -156,6 +167,7 @@ func checkDeviceInfo(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 		binary.LittleEndian.PutUint16(fullData, code)
 		copy(fullData[2:], data)
 
+		// Inkbird specific handling
 		if isInkbird(d.Name) || isInkbird(name) {
 			if len(fullData) == 9 || len(fullData) == 18 || (len(fullData) == 17 && fullData[0] == 0x54 && fullData[1] == 0x32) {
 				d.EnvData = fullData
@@ -165,18 +177,18 @@ func checkDeviceInfo(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 		}
 
 		switch code {
-		case 0x02d5:
+		case 0x02d5: // OMRON
 			if len(data) >= 16 {
 				d.EnvData = data
 			}
-		case 0x0969:
+		case 0x0969: // SwitchBot
 			if len(data) >= 12 {
 				d.EnvData = data[7:]
 			}
-		case 0x004c, 0x0006:
-		case 0x1c03, 0x1d03:
-		case 0x0087:
-		case 0x01a9:
+		case 0x004c, 0x0006: // Apple, Microsoft (ignore)
+		case 0x1c03, 0x1d03: // (ignore)
+		case 0x0087: // (ignore)
+		case 0x01a9: // (ignore)
 		default:
 			if code != 0 && debug {
 				log.Printf("AdManufacturerSpecific code=%04x data=%x d=%+v", code, data, d)
@@ -187,10 +199,12 @@ func checkDeviceInfo(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 		}
 	}
 
+	// Parse Service Data
 	for _, sd := range r.ServiceData() {
 		uuidStr := sd.UUID.String()
 		data := sd.Data
 		if strings.HasPrefix(uuidStr, "00000d00") {
+			// OMRON
 			if len(data) == 6 && data[0] == 0x54 {
 				d.EnvData = make([]byte, 2+len(data))
 				d.EnvData[0] = 0x00
@@ -198,7 +212,9 @@ func checkDeviceInfo(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 				copy(d.EnvData[2:], data)
 			}
 		} else if strings.HasPrefix(uuidStr, "0000fd3d") {
+			// SwitchBot
 			if len(data) == 6 && data[0] == 0x73 {
+				// Motion Sensor
 				t := int64(data[3])*256 + int64(data[4])
 				if data[5]&0x80 == 0x80 {
 					t += 0x10000
@@ -236,6 +252,7 @@ func checkDeviceInfo(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 		}
 	}
 
+	// Parse flags from raw bytes
 	raw := r.Bytes()
 	if len(raw) > 0 {
 		info := ""
@@ -260,6 +277,7 @@ func checkDeviceInfo(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 	}
 }
 
+// getInfoFromFlag decodes Bluetooth advertisement flags.
 func getInfoFromFlag(flag int) string {
 	ret := ""
 	if (flag & 0x01) != 0 {
@@ -292,6 +310,7 @@ func getInfoFromFlag(flag int) string {
 	return ret
 }
 
+// setAddrType sets whether the address is public or random.
 func setAddrType(d *BluetoothDeviceEnt, addr bluetooth.Address) {
 	d.FixedAddr = !addr.IsRandom()
 	if addr.IsRandom() {
@@ -301,6 +320,7 @@ func setAddrType(d *BluetoothDeviceEnt, addr bluetooth.Address) {
 	}
 }
 
+// sendOMRONEnv parses OMRON environmental sensor data and sends via Syslog/MQTT.
 func sendOMRONEnv(d *BluetoothDeviceEnt) {
 	seq := int(d.EnvData[1])
 	temp := float64(int(d.EnvData[3])*256+int(d.EnvData[2])) * 0.01
@@ -334,6 +354,7 @@ func sendOMRONEnv(d *BluetoothDeviceEnt) {
 	})
 }
 
+// sendSwitchBotEnv parses SwitchBot WoSensorTH environmental data.
 func sendSwitchBotEnv(d *BluetoothDeviceEnt) {
 	bat := int(d.EnvData[4] & 0x7f)
 	temp := float64(int(d.EnvData[5]&0x0f))/10.0 + float64(d.EnvData[6]&0x7f)
@@ -360,6 +381,7 @@ func sendSwitchBotEnv(d *BluetoothDeviceEnt) {
 	})
 }
 
+// sendSwitchBotCo2 parses SwitchBot CO2 sensor data.
 func sendSwitchBotCo2(d *BluetoothDeviceEnt) {
 	if len(d.EnvData) < 8 {
 		return
@@ -391,6 +413,7 @@ func sendSwitchBotCo2(d *BluetoothDeviceEnt) {
 	})
 }
 
+// sendSwitchBotIP64 parses SwitchBot Outdoor Temperature/Humidity sensor data.
 func sendSwitchBotIP64(d *BluetoothDeviceEnt) {
 	if len(d.EnvData) < 5 {
 		return
@@ -420,6 +443,7 @@ func sendSwitchBotIP64(d *BluetoothDeviceEnt) {
 	})
 }
 
+// sendSwitchBotPlugMini parses SwitchBot Plug Mini power monitor data.
 func sendSwitchBotPlugMini(d *BluetoothDeviceEnt) {
 	sw := d.EnvData[0] == 0x80
 	over := (d.EnvData[3] & 0x80) == 0x80
@@ -443,6 +467,7 @@ func sendSwitchBotPlugMini(d *BluetoothDeviceEnt) {
 	})
 }
 
+// isInkbird checks if the device name matches Inkbird patterns.
 func isInkbird(name string) bool {
 	n := strings.ToLower(name)
 	return strings.HasPrefix(n, "sps") ||
@@ -452,6 +477,7 @@ func isInkbird(name string) bool {
 		strings.HasPrefix(n, "ink@iam-")
 }
 
+// sendInkbirdEnv parses Inkbird environmental sensor data.
 func sendInkbirdEnv(d *BluetoothDeviceEnt) {
 	if len(d.EnvData) < 8 {
 		return
@@ -515,6 +541,7 @@ func sendInkbirdEnv(d *BluetoothDeviceEnt) {
 	})
 }
 
+// sendMotionSensor sends motion sensor events via Syslog/MQTT.
 func sendMotionSensor(ms *MotionSensorEnt, event string) {
 	var d *BluetoothDeviceEnt
 	if v, ok := deviceMap.Load(ms.Address); !ok {
@@ -546,6 +573,8 @@ func sendMotionSensor(ms *MotionSensorEnt, event string) {
 
 var lastSendTime int64
 
+// sendReport iterates through all discovered devices, cleans up old entries,
+// and sends reports for active devices.
 func sendReport() {
 	count := 0
 	new := 0
@@ -561,7 +590,10 @@ func sendReport() {
 		if !ok {
 			return true
 		}
+		// Device importance criteria
 		important := d.Name != "" || d.FixedAddr || len(d.EnvData) > 0
+		
+		// Cleanup old or unimportant devices
 		if (!important && d.LastTime < now-15*60+10) || d.LastTime < now-60*60*48 {
 			deviceMap.Delete(k)
 			remove++
@@ -578,6 +610,7 @@ func sendReport() {
 		if d.FirstTime > lastSendTime {
 			new++
 		}
+		// Process specific device types based on advertisement data
 		if strings.HasPrefix(d.Name, "Rbt") && len(d.EnvData) >= 18 && d.EnvData[0] == 1 {
 			sendOMRONEnv(d)
 			omron++
@@ -603,6 +636,7 @@ func sendReport() {
 		if debug {
 			log.Println(d.String())
 		}
+		// General report for all devices
 		sendSyslog(d.String())
 		publishMQTT(&mqttDeviceDataEnt{
 			Time:        time.Now().Format(time.RFC3339),
@@ -628,6 +662,7 @@ func sendReport() {
 		}
 		return true
 	})
+	// Send scan statistics
 	sendSyslog(fmt.Sprintf("type=Stats,total=%d,count=%d,new=%d,remove=%d,report=%d,junk=%d,send=%d",
 		total, count, new, remove, report, junk, syslogCount))
 	publishMQTT(&mqttBlueScanStatsDataEnt{
@@ -648,6 +683,7 @@ func sendReport() {
 	lastSendTime = now
 }
 
+// getUUID returns a semicolon-separated string of discovered UUIDs.
 func getUUID(d *BluetoothDeviceEnt) string {
 	var uuids []string
 	for u := range d.UUIDMap {
