@@ -89,7 +89,7 @@ func startBlueScan(ctx context.Context, wg *sync.WaitGroup) {
 
 func checkBlueDevice(r bluetooth.ScanResult) {
 	rssi := int(r.RSSI)
-	if rssi == 0 {
+	if rssi == 0 || rssi == 127 {
 		skip++
 		return
 	}
