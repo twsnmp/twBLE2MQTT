@@ -1,0 +1,47 @@
+[tools]
+go = "1.25"
+
+[tasks.build]
+description = "Build for all platforms"
+run = """
+#!/usr/bin/env bash
+VERSION=$(grep 'var version =' main.go | cut -d '"' -f 2)
+COMMIT=$(git rev-parse --short HEAD || echo "unknown")
+LDFLAGS="-X main.version=$VERSION -X main.commit=$COMMIT -s -w"
+
+mkdir -p dist
+
+build() {
+  local os=$1
+  local arch=$2
+  local extension=$3
+  local arm=$4
+  local output="dist/twBLE2MQTT-${os}-${arch}${arm}"
+  
+  echo "Building for ${os} ${arch}${arm}..."
+  
+  # Darwin (MacOS) requires CGO for CoreBluetooth
+  local cgo=0
+  if [ "$os" = "darwin" ]; then
+    cgo=1
+  fi
+
+  if [ -n "$arm" ]; then
+    GOOS=$os GOARCH=$arch GOARM=$arm CGO_ENABLED=$cgo go build -ldflags "$LDFLAGS" -o "${output}${extension}"
+  else
+    GOOS=$os GOARCH=$arch CGO_ENABLED=$cgo go build -ldflags "$LDFLAGS" -o "${output}${extension}"
+  fi
+}
+
+build darwin amd64 ""
+build darwin arm64 ""
+build windows amd64 ".exe"
+build windows arm64 ".exe"
+build linux amd64 ""
+build linux arm64 ""
+build linux arm "" "7"
+"""
+
+[tasks.clean]
+description = "Clean dist directory"
+run = "rm -rf dist"
