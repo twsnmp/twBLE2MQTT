@@ -1,5 +1,7 @@
 # twBLE2MQTT
 
+[Japanese (日本語)](README_ja.md)
+
 ![twBLE2MQTT Infographic](images/twBLE2MQTT.svg)
 
 A Bluetooth Low Energy (BLE) to MQTT gateway that discovers and decodes advertising packets from various sensors. Inspired by Zigbee2MQTT.
@@ -8,9 +10,15 @@ A Bluetooth Low Energy (BLE) to MQTT gateway that discovers and decodes advertis
 
 - **BLE Device Discovery**: Automatically scans for nearby BLE devices and reports their presence, RSSI, and metadata.
 - **Sensor Decoding**: Decodes advertising data from popular BLE sensors:
-    - **SwitchBot**: Motion Sensor, Meter (Temperature/Humidity), CO2 Sensor, Outdoor Sensor (IP64), Plug Mini.
-    - **Inkbird**: Environmental sensors (IBS-TH1, IBS-TH2, etc.).
-    - **OMRON**: Environmental sensors.
+    | Vendor | Model/Type | Parameters |
+    |--------|------------|------------|
+    | **SwitchBot** | Meter (WoSensorTH) | Temperature, Humidity, Battery |
+    | **SwitchBot** | CO2 Sensor | Temperature, Humidity, CO2, Battery |
+    | **SwitchBot** | Outdoor Meter (IP64) | Temperature, Humidity, Battery |
+    | **SwitchBot** | Plug Mini | Switch State, Overload, Load (Power W) |
+    | **SwitchBot** | Motion Sensor | Movement, Light Level (Bright/Dark), Battery |
+    | **Inkbird** | IBS-TH1/TH2/etc. | Temperature, Humidity, Battery, (CO2 on some models) |
+    | **OMRON** | 2JCIE-BL01/BU01 | Temperature, Humidity, Light, Pressure, Noise, eTVOC, eCO2 |
 - **Multiple Destinations**:
     - **MQTT**: Publishes sensor data and device status to an MQTT broker in JSON format.
     - **Syslog**: Sends reports and events to one or more Syslog servers.
