@@ -10,6 +10,7 @@ A Bluetooth Low Energy (BLE) to MQTT gateway that discovers and decodes advertis
 
 - **BLE Device Discovery**: Automatically scans for nearby BLE devices and reports their presence, RSSI, and metadata.
 - **Sensor Decoding**: Decodes advertising data from popular BLE sensors:
+
     | Vendor | Model/Type | Parameters |
     |--------|------------|------------|
     | **SwitchBot** | Meter (WoSensorTH) | Temperature, Humidity, Battery |
@@ -19,6 +20,7 @@ A Bluetooth Low Energy (BLE) to MQTT gateway that discovers and decodes advertis
     | **SwitchBot** | Motion Sensor | Movement, Light Level (Bright/Dark), Battery |
     | **Inkbird** | IBS-TH1/TH2/etc. | Temperature, Humidity, Battery, (CO2 on some models) |
     | **OMRON** | 2JCIE-BL01/BU01 | Temperature, Humidity, Light, Pressure, Noise, eTVOC, eCO2 |
+
 - **Multiple Destinations**:
     - **MQTT**: Publishes sensor data and device status to an MQTT broker in JSON format.
     - **Syslog**: Sends reports and events to one or more Syslog servers.
@@ -94,6 +96,10 @@ You must specify at least one destination (MQTT or Syslog).
 ### Environment Variables
 
 All configuration flags can be overridden by environment variables prefixed with `TWBLUESCAN_`.
+
+## Monitoring
+
+You can monitor the data collected by twBLE2MQTT using [TWSNMP FK](https://twsnmp.github.io/twsnmpfk/).
 
 ## License
 
