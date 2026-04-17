@@ -42,8 +42,8 @@ func (d *BluetoothDeviceEnt) String() string {
 }
 
 var deviceMap sync.Map // Map of MAC address to *BluetoothDeviceEnt
-var total = 0         // Total number of scan results processed
-var skip = 0          // Number of scan results skipped due to invalid RSSI
+var total = 0          // Total number of scan results processed
+var skip = 0           // Number of scan results skipped due to invalid RSSI
 
 // MotionSensorEnt represents a SwitchBot motion sensor state.
 type MotionSensorEnt struct {
@@ -169,7 +169,7 @@ func checkDeviceInfo(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 
 		// Inkbird specific handling
 		if isInkbird(d.Name) || isInkbird(name) {
-			if len(fullData) == 9 || len(fullData) == 18 || (len(fullData) == 17 && fullData[0] == 0x54 && fullData[1] == 0x32) {
+			if len(fullData) == 9 || len(fullData) == 18 || (len(fullData) >= 17 && fullData[0] == 0x54 && fullData[1] == 0x32) {
 				d.EnvData = fullData
 				code = 0
 				d.Code = 0
@@ -248,6 +248,14 @@ func checkDeviceInfo(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 				d.SBType = 0x73
 			} else if d.Code == 0x0969 && len(data) > 0 {
 				d.SBType = data[0]
+			}
+		} else if strings.HasPrefix(uuidStr, "0000fff1") {
+			// Inkbird
+			if len(data) == 6 {
+				d.EnvData = make([]byte, 2+len(data))
+				d.EnvData[0] = 0xf1
+				d.EnvData[1] = 0xff
+				copy(d.EnvData[2:], data)
 			}
 		}
 	}
@@ -482,11 +490,30 @@ func sendInkbirdEnv(d *BluetoothDeviceEnt) {
 	if len(d.EnvData) < 8 {
 		return
 	}
-	var temp, hum float64
+	var temp, hum, press float64
 	bat := -1
 	co2 := 0
 
-	if len(d.EnvData) == 9 {
+	if len(d.EnvData) >= 17 && d.EnvData[0] == 0x54 && d.EnvData[1] == 0x32 {
+		// IAM-T1
+		status := d.EnvData[9]
+		tempRaw := int16((uint16(d.EnvData[10]) << 8) | uint16(d.EnvData[11]))
+		humRaw := (uint16(d.EnvData[12]) << 8) | uint16(d.EnvData[13])
+		co2 = int((uint16(d.EnvData[14]) << 8) | uint16(d.EnvData[15]))
+		tempF := float64(tempRaw) / 10.0
+		if (status & 0x02) != 0 {
+			temp = (tempF - 32) * 5.0 / 9.0
+		} else {
+			temp = tempF
+		}
+		hum = float64(humRaw) / 10.0
+		if len(d.EnvData) >= 18 {
+			pressRaw := (uint16(d.EnvData[16]) << 8) | uint16(d.EnvData[17])
+			if pressRaw > 0 {
+				press = float64(pressRaw)
+			}
+		}
+	} else if len(d.EnvData) == 9 {
 		tempRaw := int16(uint16(d.EnvData[0]) | (uint16(d.EnvData[1]) << 8))
 		humRaw := uint16(d.EnvData[2]) | (uint16(d.EnvData[3]) << 8)
 		bat = int(d.EnvData[7])
@@ -510,12 +537,18 @@ func sendInkbirdEnv(d *BluetoothDeviceEnt) {
 			temp = tempF
 		}
 		hum = float64(humRaw) / 10.0
+	} else if len(d.EnvData) == 8 && d.EnvData[0] == 0xf1 && d.EnvData[1] == 0xff {
+		tempRaw := int16((uint16(d.EnvData[2]) << 8) | uint16(d.EnvData[3]))
+		humRaw := (uint16(d.EnvData[4]) << 8) | uint16(d.EnvData[5])
+		co2 = int((uint16(d.EnvData[6]) << 8) | uint16(d.EnvData[7]))
+		temp = float64(tempRaw) / 10.0
+		hum = float64(humRaw) / 10.0
 	} else {
 		return
 	}
 
 	if debug {
-		log.Printf("inkbird type=InkbirdEnv,temp=%.02f,hum=%.02f,bat=%d,co2=%d", temp, hum, bat, co2)
+		log.Printf("inkbird type=InkbirdEnv,temp=%.02f,hum=%.02f,bat=%d,co2=%d,press=%.02f", temp, hum, bat, co2, press)
 	}
 
 	msg := fmt.Sprintf("type=InkbirdEnv,address=%s,name=%s,rssi=%d,temp=%.02f,hum=%.02f",
@@ -525,6 +558,9 @@ func sendInkbirdEnv(d *BluetoothDeviceEnt) {
 	}
 	if co2 > 0 {
 		msg += fmt.Sprintf(",co2=%d", co2)
+	}
+	if press > 0 {
+		msg += fmt.Sprintf(",press=%.02f", press)
 	}
 	sendSyslog(msg)
 
@@ -538,6 +574,7 @@ func sendInkbirdEnv(d *BluetoothDeviceEnt) {
 		Humidity:    hum,
 		Battery:     bat,
 		Co2:         co2,
+		Pressure:    press,
 	})
 }
 
@@ -592,7 +629,7 @@ func sendReport() {
 		}
 		// Device importance criteria
 		important := d.Name != "" || d.FixedAddr || len(d.EnvData) > 0
-		
+
 		// Cleanup old or unimportant devices
 		if (!important && d.LastTime < now-15*60+10) || d.LastTime < now-60*60*48 {
 			deviceMap.Delete(k)
@@ -629,7 +666,7 @@ func sendReport() {
 				sendSwitchBotPlugMini(d)
 				swbot++
 			}
-		} else if isInkbird(d.Name) && (len(d.EnvData) == 9 || len(d.EnvData) == 17 || len(d.EnvData) == 18) {
+		} else if isInkbird(d.Name) && (len(d.EnvData) == 8 || len(d.EnvData) == 9 || len(d.EnvData) >= 17) {
 			sendInkbirdEnv(d)
 			inkbird++
 		}
