@@ -614,7 +614,7 @@ var lastSendTime int64
 // and sends reports for active devices.
 func sendReport() {
 	count := 0
-	new := 0
+	newDevices := 0
 	remove := 0
 	omron := 0
 	swbot := 0
@@ -645,7 +645,7 @@ func sendReport() {
 			return true
 		}
 		if d.FirstTime > lastSendTime {
-			new++
+			newDevices++
 		}
 		// Process specific device types based on advertisement data
 		if strings.HasPrefix(d.Name, "Rbt") && len(d.EnvData) >= 18 && d.EnvData[0] == 1 {
@@ -701,20 +701,20 @@ func sendReport() {
 	})
 	// Send scan statistics
 	sendSyslog(fmt.Sprintf("type=Stats,total=%d,count=%d,new=%d,remove=%d,report=%d,junk=%d,send=%d",
-		total, count, new, remove, report, junk, syslogCount))
+		total, count, newDevices, remove, report, junk, syslogCount))
 	publishMQTT(&mqttBlueScanStatsDataEnt{
 		Time:    time.Now().Format(time.RFC3339),
 		Total:   total,
 		Count:   count,
-		New:     new,
+		New:     newDevices,
 		Remove:  remove,
 		Report:  report,
-		Adaptor: "default",
+		Adapter: "default",
 		Junk:    junk,
 	})
 	if debug {
 		log.Printf("total=%d skip=%d count=%d new=%d remove=%d omron=%d swbot=%d inkbird=%d send=%d report=%d junk=%d",
-			total, skip, count, new, remove, omron, swbot, inkbird, syslogCount, report, junk)
+			total, skip, count, newDevices, remove, omron, swbot, inkbird, syslogCount, report, junk)
 	}
 	syslogCount = 0
 	lastSendTime = now

@@ -79,7 +79,7 @@ type mqttBlueScanStatsDataEnt struct {
 	Remove  int    `json:"remove"`
 	Report  int    `json:"report"`
 	Junk    int    `json:"junk"`
-	Adaptor string `json:"adapter"`
+	Adapter string `json:"adapter"`
 }
 
 type mqttMonitorDataEnt struct {
@@ -148,15 +148,15 @@ func startMQTT(ctx context.Context, wg *sync.WaitGroup) {
 // getMqttTopic returns the appropriate sub-topic based on the message type.
 func getMqttTopic(msg interface{}) string {
 	r := mqttTopic
-	switch msg.(type) {
+	switch m := msg.(type) {
 	case *mqttDeviceDataEnt:
-		r += "/Device"
+		r += "/Device/" + m.Address
 	case *mqttEnvDataEnt:
-		r += "/Env"
+		r += "/Env/" + m.Address
 	case *mqttMotionSensorDataEnt:
-		r += "/Motion"
+		r += "/Motion/" + m.Address
 	case *mqttPowerMonitorPlugDataEnt:
-		r += "/Power"
+		r += "/Power/" + m.Address
 	case *mqttBlueScanStatsDataEnt:
 		r += "/BlueScanStats"
 	case *mqttMonitorDataEnt:
