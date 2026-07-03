@@ -1,6 +1,6 @@
 module github.com/twsnmp/twBLE2MQTT.git
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/eclipse/paho.mqtt.golang v1.5.1
@@ -25,7 +25,7 @@ require (
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	golang.org/x/exp v0.0.0-20241204233417-43b7b7cde48d // indirect
-	golang.org/x/net v0.44.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/sys v0.36.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 )
