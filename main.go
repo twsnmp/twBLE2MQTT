@@ -21,8 +21,8 @@ var syslogDst = ""      // Destination list for syslog (comma separated)
 var mqttDst = ""        // MQTT broker destination (e.g., tcp://broker:1883)
 var mqttUser = ""       // MQTT username
 var mqttPassword = ""   // MQTT password
-var mqttClientID = "twBlueScan" // MQTT client ID
-var mqttTopic = "twBlueScan"    // MQTT base topic
+var mqttClientID = "twBLE2MQTT" // MQTT client ID
+var mqttTopic = "twBLE2MQTT"    // MQTT base topic
 var syslogInterval = 300        // Interval for sending reports (seconds)
 var codeToVendor string         // Path to CSV for company code to vendor mapping
 var addrToVendor string         // Path to CSV for MAC address to vendor mapping
@@ -36,8 +36,8 @@ func init() {
 	flag.StringVar(&mqttDst, "mqtt", "", "mqtt broker destnation")
 	flag.StringVar(&mqttUser, "mqttUser", "", "mqtt user name")
 	flag.StringVar(&mqttPassword, "mqttPassword", "", "mqtt password")
-	flag.StringVar(&mqttClientID, "mqttClientID", "twBlueScan", "mqtt client id")
-	flag.StringVar(&mqttTopic, "mqttTopic", "twBlueScan", "mqtt topic")
+	flag.StringVar(&mqttClientID, "mqttClientID", "twBLE2MQTT", "mqtt client id")
+	flag.StringVar(&mqttTopic, "mqttTopic", "twBLE2MQTT", "mqtt topic")
 	flag.IntVar(&syslogInterval, "interval", 600, "syslog send interval(sec)")
 	flag.StringVar(&codeToVendor, "code", "", "make company code to vendor map")
 	flag.StringVar(&addrToVendor, "addr", "", "make address to vendor map")
@@ -45,9 +45,9 @@ func init() {
 	flag.BoolVar(&allAddress, "all", false, "report all address(include private)")
 	flag.BoolVar(&idByName, "idByName", false, "use device name and type for device ID of random address")
 
-	// Override flags with environment variables if present (prefix: TWBLUESCAN_)
+	// Override flags with environment variables if present (prefix: TWBLE2MQTT_)
 	flag.VisitAll(func(f *flag.Flag) {
-		if s := os.Getenv("TWBLUESCAN_" + strings.ToUpper(f.Name)); s != "" {
+		if s := os.Getenv("TWBLE2MQTT_" + strings.ToUpper(f.Name)); s != "" {
 			f.Value.Set(s)
 		}
 	})

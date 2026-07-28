@@ -60,7 +60,7 @@ func startSyslog(ctx context.Context, wg *sync.WaitGroup) {
 			syslogCount++
 			// Format message in RFC5424-like format
 			// <174> is local5.info priority
-			s := fmt.Sprintf("<%d>%s %s twBlueScan: %s", 21*8+6, time.Now().Format("2006-01-02T15:04:05-07:00"), host, msg)
+			s := fmt.Sprintf("<%d>%s %s twBLE2MQTT: %s", 21*8+6, time.Now().Format("2006-01-02T15:04:05-07:00"), host, msg)
 			for _, d := range dst {
 				d.Write([]byte(s))
 			}

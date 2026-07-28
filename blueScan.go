@@ -805,7 +805,7 @@ func sendReport() {
 	// Send scan statistics
 	sendSyslog(fmt.Sprintf("type=Stats,total=%d,count=%d,new=%d,remove=%d,report=%d,junk=%d,send=%d",
 		total, count, newDevices, remove, report, junk, syslogCount))
-	publishMQTT(&mqttBlueScanStatsDataEnt{
+	publishMQTT(&mqttBLE2MQTTStatsDataEnt{
 		Time:    time.Now().Format(time.RFC3339),
 		Total:   total,
 		Count:   count,

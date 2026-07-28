@@ -83,19 +83,19 @@ You must specify at least one destination (MQTT or Syslog).
 
 | Flag | Environment Variable | Description | Default |
 |------|----------------------|-------------|---------|
-| `-mqtt` | `TWBLUESCAN_MQTT` | MQTT broker destination (e.g., `tcp://broker:1883`) | "" |
-| `-mqttUser` | `TWBLUESCAN_MQTTUSER` | MQTT username | "" |
-| `-mqttPassword` | `TWBLUESCAN_MQTTPASSWORD` | MQTT password | "" |
-| `-mqttClientID` | `TWBLUESCAN_MQTTCLIENTID` | MQTT client ID | `twBlueScan` |
-| `-mqttTopic` | `TWBLUESCAN_MQTTTOPIC` | MQTT base topic | `twBlueScan` |
-| `-syslog` | `TWBLUESCAN_SYSLOG` | Comma-separated list of Syslog destinations | "" |
-| `-interval` | `TWBLUESCAN_INTERVAL` | Interval for sending periodic reports (seconds) | `600` |
-| `-all` | `TWBLUESCAN_ALL` | Report all addresses (including private/random) | `false` |
-| `-debug` | `TWBLUESCAN_DEBUG` | Enable debug mode | `false` |
+| `-mqtt` | `TWBLE2MQTT_MQTT` | MQTT broker destination (e.g., `tcp://broker:1883`) | "" |
+| `-mqttUser` | `TWBLE2MQTT_MQTTUSER` | MQTT username | "" |
+| `-mqttPassword` | `TWBLE2MQTT_MQTTPASSWORD` | MQTT password | "" |
+| `-mqttClientID` | `TWBLE2MQTT_MQTTCLIENTID` | MQTT client ID | `twBLE2MQTT` |
+| `-mqttTopic` | `TWBLE2MQTT_MQTTTOPIC` | MQTT base topic | `twBLE2MQTT` |
+| `-syslog` | `TWBLE2MQTT_SYSLOG` | Comma-separated list of Syslog destinations | "" |
+| `-interval` | `TWBLE2MQTT_INTERVAL` | Interval for sending periodic reports (seconds) | `600` |
+| `-all` | `TWBLE2MQTT_ALL` | Report all addresses (including private/random) | `false` |
+| `-debug` | `TWBLE2MQTT_DEBUG` | Enable debug mode | `false` |
 
 ### Environment Variables
 
-All configuration flags can be overridden by environment variables prefixed with `TWBLUESCAN_`.
+All configuration flags can be overridden by environment variables prefixed with `TWBLE2MQTT_`.
 
 ## Monitoring
 

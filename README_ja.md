@@ -83,19 +83,19 @@ MQTTまたはSyslogの少なくとも1つの転送先を指定する必要があ
 
 | フラグ | 環境変数 | 説明 | デフォルト値 |
 |------|----------------------|-------------|---------|
-| `-mqtt` | `TWBLUESCAN_MQTT` | MQTTブローカーの接続先 (例: `tcp://broker:1883`) | "" |
-| `-mqttUser` | `TWBLUESCAN_MQTTUSER` | MQTT ユーザー名 | "" |
-| `-mqttPassword` | `TWBLUESCAN_MQTTPASSWORD` | MQTT パスワード | "" |
-| `-mqttClientID` | `TWBLUESCAN_MQTTCLIENTID` | MQTT クライアント ID | `twBlueScan` |
-| `-mqttTopic` | `TWBLUESCAN_MQTTTOPIC` | MQTT 基本トピック | `twBlueScan` |
-| `-syslog` | `TWBLUESCAN_SYSLOG` | カンマ区切りのSyslog転送先リスト | "" |
-| `-interval` | `TWBLUESCAN_INTERVAL` | 定期レポート送信の間隔（秒） | `600` |
-| `-all` | `TWBLUESCAN_ALL` | すべてのアドレス（プライベート/ランダムを含む）を報告 | `false` |
-| `-debug` | `TWBLUESCAN_DEBUG` | デバッグモードを有効化 | `false` |
+| `-mqtt` | `TWBLE2MQTT_MQTT` | MQTTブローカーの接続先 (例: `tcp://broker:1883`) | "" |
+| `-mqttUser` | `TWBLE2MQTT_MQTTUSER` | MQTT ユーザー名 | "" |
+| `-mqttPassword` | `TWBLE2MQTT_MQTTPASSWORD` | MQTT パスワード | "" |
+| `-mqttClientID` | `TWBLE2MQTT_MQTTCLIENTID` | MQTT クライアント ID | `twBLE2MQTT` |
+| `-mqttTopic` | `TWBLE2MQTT_MQTTTOPIC` | MQTT 基本トピック | `twBLE2MQTT` |
+| `-syslog` | `TWBLE2MQTT_SYSLOG` | カンマ区切りのSyslog転送先リスト | "" |
+| `-interval` | `TWBLE2MQTT_INTERVAL` | 定期レポート送信の間隔（秒） | `600` |
+| `-all` | `TWBLE2MQTT_ALL` | すべてのアドレス（プライベート/ランダムを含む）を報告 | `false` |
+| `-debug` | `TWBLE2MQTT_DEBUG` | デバッグモードを有効化 | `false` |
 
 ### 環境変数
 
-すべての設定フラグは、`TWBLUESCAN_` プレフィックスを付けた環境変数で上書きできます。
+すべての設定フラグは、`TWBLE2MQTT_` プレフィックスを付けた環境変数で上書きできます。
 
 ## モニタリング
 

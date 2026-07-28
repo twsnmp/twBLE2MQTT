@@ -77,7 +77,7 @@ type mqttPowerMonitorPlugDataEnt struct {
 	Load    int    `json:"load"`
 }
 
-type mqttBlueScanStatsDataEnt struct {
+type mqttBLE2MQTTStatsDataEnt struct {
 	Time    string `json:"time"`
 	Total   int    `json:"total"`
 	Count   int    `json:"count"`
@@ -163,8 +163,8 @@ func getMqttTopic(msg interface{}) string {
 		r += "/Motion/" + m.ID
 	case *mqttPowerMonitorPlugDataEnt:
 		r += "/Power/" + m.ID
-	case *mqttBlueScanStatsDataEnt:
-		r += "/BlueScanStats"
+	case *mqttBLE2MQTTStatsDataEnt:
+		r += "/BLE2MQTTStats"
 	case *mqttMonitorDataEnt:
 		r += "/Monitor"
 	default:
