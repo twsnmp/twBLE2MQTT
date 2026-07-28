@@ -16,24 +16,28 @@ var mqttCh = make(chan interface{}, 2000)
 // Data structures for MQTT JSON payloads
 
 type mqttDeviceDataEnt struct {
-	Time        string `json:"time"`
-	Address     string `json:"address"`
-	AddressType string `json:"address_type"`
-	Name        string `json:"name"`
-	Vendor      string `json:"vendor"`
-	MinRSSI     int    `json:"min_rssi"`
-	MaxRSSI     int    `json:"max_rssi"`
-	RSSI        int    `json:"rssi"`
-	Info        string `json:"info"`
-	UUID        string `json:"uuid"`
-	Count       int    `json:"count"`
-	FirstTime   string `json:"first_time"`
-	LastTime    string `json:"last_time"`
+	Time            string `json:"time"`
+	ID              string `json:"id"`
+	Address         string `json:"address"`
+	AddressType     string `json:"address_type"`
+	DeviceType      string `json:"device_type"`
+	AddrChangeCount int    `json:"address_change"`
+	Name            string `json:"name"`
+	Vendor          string `json:"vendor"`
+	MinRSSI         int    `json:"min_rssi"`
+	MaxRSSI         int    `json:"max_rssi"`
+	RSSI            int    `json:"rssi"`
+	Info            string `json:"info"`
+	UUID            string `json:"uuid"`
+	Count           int    `json:"count"`
+	FirstTime       string `json:"first_time"`
+	LastTime        string `json:"last_time"`
 }
 
 type mqttEnvDataEnt struct {
 	Time        string  `json:"time"`
 	Type        string  `json:"type"`
+	ID          string  `json:"id"`
 	Address     string  `json:"address"`
 	Name        string  `json:"name"`
 	RSSI        int     `json:"rssi"`
@@ -50,6 +54,7 @@ type mqttEnvDataEnt struct {
 type mqttMotionSensorDataEnt struct {
 	Time         string `json:"time"`
 	Type         string `json:"type"`
+	ID           string `json:"id"`
 	Address      string `json:"address"`
 	Name         string `json:"name"`
 	RSSI         int    `json:"rssi"`
@@ -63,6 +68,7 @@ type mqttMotionSensorDataEnt struct {
 type mqttPowerMonitorPlugDataEnt struct {
 	Time    string `json:"time"`
 	Type    string `json:"type"`
+	ID      string `json:"id"`
 	Address string `json:"address"`
 	Name    string `json:"name"`
 	RSSI    int    `json:"rssi"`
@@ -150,13 +156,13 @@ func getMqttTopic(msg interface{}) string {
 	r := mqttTopic
 	switch m := msg.(type) {
 	case *mqttDeviceDataEnt:
-		r += "/Device/" + m.Address
+		r += "/Device/" + m.ID
 	case *mqttEnvDataEnt:
-		r += "/Env/" + m.Address
+		r += "/Env/" + m.ID
 	case *mqttMotionSensorDataEnt:
-		r += "/Motion/" + m.Address
+		r += "/Motion/" + m.ID
 	case *mqttPowerMonitorPlugDataEnt:
-		r += "/Power/" + m.Address
+		r += "/Power/" + m.ID
 	case *mqttBlueScanStatsDataEnt:
 		r += "/BlueScanStats"
 	case *mqttMonitorDataEnt:

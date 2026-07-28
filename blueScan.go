@@ -14,27 +14,31 @@ import (
 
 // BluetoothDeviceEnt represents a discovered Bluetooth device and its metadata.
 type BluetoothDeviceEnt struct {
-	Address     string          // MAC address
-	AddressType string          // public or random
-	Name        string          // Local name of the device
-	FixedAddr   bool            // True if the address is not random
-	MinRSSI     int             // Minimum RSSI observed
-	MaxRSSI     int             // Maximum RSSI observed
-	RSSI        int             // Current RSSI
-	Info        string          // Additional info from flags (e.g., LE Limited)
-	Count       int             // Number of times the device was seen in the current interval
-	Code        uint16          // Manufacturer code
-	SBType      uint8           // SwitchBot specific type
-	EnvData     []byte          // Raw environmental data (sensor readings)
-	UUIDMap     map[string]bool // Set of service UUIDs discovered
-	FirstTime   int64           // Timestamp of first discovery
-	LastTime    int64           // Timestamp of last discovery
+	ID                   string          // Unique ID (MAC address or NAME:...:TYPE:... if idByName)
+	Address              string          // MAC address (last seen MAC)
+	AddressType          string          // public or random
+	DeviceType           string          // Estimated device type
+	AddrChangeCount      int             // Number of times address changed for this device ID
+	Name                 string          // Local name of the device
+	FixedAddr            bool            // True if the address is not random
+	MinRSSI              int             // Minimum RSSI observed
+	MaxRSSI              int             // Maximum RSSI observed
+	RSSI                 int             // Current RSSI
+	Info                 string          // Additional info from flags (e.g., LE Limited)
+	Count                int             // Number of times the device was seen in the current interval
+	Code                 uint16          // Manufacturer code
+	SBType               uint8           // SwitchBot specific type
+	EnvData              []byte          // Raw environmental data (sensor readings)
+	UUIDMap              map[string]bool // Set of service UUIDs discovered
+	FirstTime            int64           // Timestamp of first discovery
+	LastTime             int64           // Timestamp of last discovery
+	LastLoggedUnresolved int64           // Timestamp of last unresolved log
 }
 
 // String returns a formatted string representation of the Bluetooth device for logging/syslog.
 func (d *BluetoothDeviceEnt) String() string {
-	return fmt.Sprintf("type=Device,address=%s,name=%s,rssi=%d,min=%d,max=%d,addrType=%s,vendor=%s,info=%s,uuid=%s,ft=%s,lt=%s",
-		d.Address, d.Name, d.RSSI, d.MinRSSI, d.MaxRSSI,
+	return fmt.Sprintf("type=Device,id=%s,address=%s,name=%s,deviceType=%s,addrChange=%d,rssi=%d,min=%d,max=%d,addrType=%s,vendor=%s,info=%s,uuid=%s,ft=%s,lt=%s",
+		d.ID, d.Address, d.Name, d.DeviceType, d.AddrChangeCount, d.RSSI, d.MinRSSI, d.MaxRSSI,
 		d.AddressType, getVendor(d), d.Info, getUUID(d),
 		time.Unix(d.FirstTime, 0).Format(time.RFC3339),
 		time.Unix(d.LastTime, 0).Format(time.RFC3339),
@@ -101,8 +105,18 @@ func checkBlueDevice(r bluetooth.ScanResult) {
 	}
 	total++
 	now := time.Now().Unix()
-	addr := r.Address.String()
-	if v, ok := deviceMap.Load(addr); ok {
+
+	dTemp := &BluetoothDeviceEnt{
+		UUIDMap: make(map[string]bool),
+	}
+	setAddrType(dTemp, r.Address)
+	checkDeviceInfo(dTemp, r)
+	estimateDeviceType(dTemp, r)
+
+	id := getDeviceID(dTemp, r)
+	currentAddr := r.Address.String()
+
+	if v, ok := deviceMap.Load(id); ok {
 		if d, ok := v.(*BluetoothDeviceEnt); ok {
 			d.RSSI = rssi
 			if d.RSSI > d.MaxRSSI {
@@ -112,16 +126,78 @@ func checkBlueDevice(r bluetooth.ScanResult) {
 				d.MinRSSI = d.RSSI
 			}
 			checkDeviceInfo(d, r)
+			estimateDeviceType(d, r)
+			if d.Address != currentAddr {
+				d.Address = currentAddr
+				d.AddrChangeCount++
+				setAddrType(d, r.Address)
+			}
 			d.Count++
 			d.LastTime = now
+			logUnresolvedDevice(d, r)
 			return
 		} else {
-			deviceMap.Delete(addr)
+			deviceMap.Delete(id)
 		}
 	}
-	// New device discovered
+
+	// id で見つからない場合、フォールバックの MAC アドレスキーで登録されているエントリがないか検索
+	if currentAddr != id {
+		if v, ok := deviceMap.Load(currentAddr); ok {
+			if d, ok := v.(*BluetoothDeviceEnt); ok {
+				d.RSSI = rssi
+				if d.RSSI > d.MaxRSSI {
+					d.MaxRSSI = d.RSSI
+				}
+				if d.RSSI < d.MinRSSI {
+					d.MinRSSI = d.RSSI
+				}
+				checkDeviceInfo(d, r)
+				estimateDeviceType(d, r)
+				d.Count++
+				d.LastTime = now
+
+				newID := getDeviceID(d, r)
+				if newID != currentAddr {
+					deviceMap.Delete(currentAddr)
+					d.ID = newID
+					d.Address = currentAddr
+					if existV, loaded := deviceMap.LoadOrStore(newID, d); loaded {
+						if existD, ok := existV.(*BluetoothDeviceEnt); ok {
+							existD.Count += d.Count
+							existD.LastTime = now
+							if d.RSSI > existD.MaxRSSI {
+								existD.MaxRSSI = d.RSSI
+							}
+							if d.RSSI < existD.MinRSSI {
+								existD.MinRSSI = d.RSSI
+							}
+							if existD.Address != currentAddr {
+								existD.Address = currentAddr
+								existD.AddrChangeCount++
+								setAddrType(existD, r.Address)
+							}
+							if existD.Name == "" || strings.HasPrefix(existD.Name, "[") {
+								existD.Name = d.Name
+							}
+							logUnresolvedDevice(existD, r)
+						}
+					} else {
+						logUnresolvedDevice(d, r)
+					}
+					return
+				}
+				logUnresolvedDevice(d, r)
+				return
+			} else {
+				deviceMap.Delete(currentAddr)
+			}
+		}
+	}
+
 	d := &BluetoothDeviceEnt{
-		Address:   addr,
+		ID:        id,
+		Address:   currentAddr,
 		RSSI:      rssi,
 		MinRSSI:   rssi,
 		MaxRSSI:   rssi,
@@ -130,8 +206,15 @@ func checkBlueDevice(r bluetooth.ScanResult) {
 		FirstTime: now,
 		LastTime:  now,
 	}
+	setAddrType(d, r.Address)
 	checkDeviceInfo(d, r)
-	deviceMap.Store(addr, d)
+	estimateDeviceType(d, r)
+
+	finalID := getDeviceID(d, r)
+	d.ID = finalID
+	d.Address = currentAddr
+	deviceMap.Store(finalID, d)
+	logUnresolvedDevice(d, r)
 }
 
 // getVendor returns the vendor name based on manufacturer code or MAC address.
@@ -318,12 +401,22 @@ func getInfoFromFlag(flag int) string {
 	return ret
 }
 
-// setAddrType sets whether the address is public or random.
+// isUUIDAddress checks if an address string is in UUID format (e.g., macOS CoreBluetooth).
+func isUUIDAddress(addr string) bool {
+	return len(addr) == 36 && strings.Count(addr, "-") == 4
+}
+
+// setAddrType sets whether the address is public, random, or uuid.
 func setAddrType(d *BluetoothDeviceEnt, addr bluetooth.Address) {
-	d.FixedAddr = !addr.IsRandom()
-	if addr.IsRandom() {
+	addrStr := addr.String()
+	if isUUIDAddress(addrStr) {
+		d.FixedAddr = false
+		d.AddressType = "uuid"
+	} else if addr.IsRandom() {
+		d.FixedAddr = false
 		d.AddressType = "random"
 	} else {
+		d.FixedAddr = true
 		d.AddressType = "public"
 	}
 }
@@ -348,6 +441,7 @@ func sendOMRONEnv(d *BluetoothDeviceEnt) {
 	))
 	publishMQTT(&mqttEnvDataEnt{
 		Time:        time.Now().Format(time.RFC3339),
+		ID:          d.ID,
 		Address:     d.Address,
 		Name:        d.Name,
 		Type:        "OMRONEnv",
@@ -379,6 +473,7 @@ func sendSwitchBotEnv(d *BluetoothDeviceEnt) {
 	))
 	publishMQTT(&mqttEnvDataEnt{
 		Time:        time.Now().Format(time.RFC3339),
+		ID:          d.ID,
 		Address:     d.Address,
 		Name:        d.Name,
 		Type:        "SwitchBotEnv",
@@ -410,6 +505,7 @@ func sendSwitchBotCo2(d *BluetoothDeviceEnt) {
 	))
 	publishMQTT(&mqttEnvDataEnt{
 		Time:        time.Now().Format(time.RFC3339),
+		ID:          d.ID,
 		Address:     d.Address,
 		Name:        d.Name,
 		Type:        "SwitchBotEnv",
@@ -441,6 +537,7 @@ func sendSwitchBotIP64(d *BluetoothDeviceEnt) {
 	))
 	publishMQTT(&mqttEnvDataEnt{
 		Time:        time.Now().Format(time.RFC3339),
+		ID:          d.ID,
 		Address:     d.Address,
 		Name:        d.Name,
 		Type:        "SwitchBotEnv",
@@ -465,6 +562,7 @@ func sendSwitchBotPlugMini(d *BluetoothDeviceEnt) {
 	))
 	publishMQTT(&mqttPowerMonitorPlugDataEnt{
 		Time:    time.Now().Format(time.RFC3339),
+		ID:      d.ID,
 		Address: d.Address,
 		Name:    d.Name,
 		Type:    "SwitchBotPlugMini",
@@ -566,6 +664,7 @@ func sendInkbirdEnv(d *BluetoothDeviceEnt) {
 
 	publishMQTT(&mqttEnvDataEnt{
 		Time:        time.Now().Format(time.RFC3339),
+		ID:          d.ID,
 		Address:     d.Address,
 		Name:        d.Name,
 		Type:        "InkbirdEnv",
@@ -595,6 +694,7 @@ func sendMotionSensor(ms *MotionSensorEnt, event string) {
 		ms.Address, d.Name, d.RSSI, ms.Moving, event, ms.LastMoveDiff, time.Unix(ms.LastMove, 0).Format(time.RFC3339), ms.Battery, ms.Light))
 	publishMQTT(&mqttMotionSensorDataEnt{
 		Time:         time.Now().Format(time.RFC3339),
+		ID:           d.ID,
 		Address:      ms.Address,
 		Name:         d.Name,
 		Type:         "SwitchBotMotionSensor",
@@ -676,19 +776,22 @@ func sendReport() {
 		// General report for all devices
 		sendSyslog(d.String())
 		publishMQTT(&mqttDeviceDataEnt{
-			Time:        time.Now().Format(time.RFC3339),
-			Address:     d.Address,
-			Name:        d.Name,
-			AddressType: d.AddressType,
-			Info:        d.Info,
-			Vendor:      getVendor(d),
-			UUID:        getUUID(d),
-			MinRSSI:     d.MinRSSI,
-			MaxRSSI:     d.MaxRSSI,
-			RSSI:        d.RSSI,
-			Count:       d.Count,
-			FirstTime:   time.Unix(d.FirstTime, 0).Format(time.RFC3339),
-			LastTime:    time.Unix(d.LastTime, 0).Format(time.RFC3339),
+			Time:            time.Now().Format(time.RFC3339),
+			ID:              d.ID,
+			Address:         d.Address,
+			Name:            d.Name,
+			AddressType:     d.AddressType,
+			DeviceType:      d.DeviceType,
+			AddrChangeCount: d.AddrChangeCount,
+			Info:            d.Info,
+			Vendor:          getVendor(d),
+			UUID:            getUUID(d),
+			MinRSSI:         d.MinRSSI,
+			MaxRSSI:         d.MaxRSSI,
+			RSSI:            d.RSSI,
+			Count:           d.Count,
+			FirstTime:       time.Unix(d.FirstTime, 0).Format(time.RFC3339),
+			LastTime:        time.Unix(d.LastTime, 0).Format(time.RFC3339),
 		})
 		report++
 		return true
@@ -727,4 +830,402 @@ func getUUID(d *BluetoothDeviceEnt) string {
 		uuids = append(uuids, u)
 	}
 	return strings.Join(uuids, ";")
+}
+
+func getAppearance(r bluetooth.ScanResult) uint16 {
+	raw := r.Bytes()
+	for i := 0; i < len(raw); {
+		l := int(raw[i])
+		if l == 0 || i+1+l > len(raw) {
+			break
+		}
+		typ := raw[i+1]
+		data := raw[i+2 : i+1+l]
+		if typ == 0x19 && len(data) == 2 {
+			return uint16(data[1])*256 + uint16(data[0])
+		}
+		i += 1 + l
+	}
+	return 0
+}
+
+func estimateDeviceType(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
+	devType := d.DeviceType
+
+	// 1. Appearance による判定
+	app := getAppearance(r)
+	if app != 0 {
+		switch {
+		case app == 0x03C1:
+			if devType == "" {
+				devType = "GenericKeyboard"
+			}
+		case app == 0x03C2:
+			if devType == "" {
+				devType = "GenericMouse"
+			}
+		case app == 0x03C3:
+			if devType == "" {
+				devType = "GenericJoystick"
+			}
+		case app == 0x03C4:
+			if devType == "" {
+				devType = "GenericGamepad"
+			}
+		case app >= 0x03C0 && app <= 0x03CF:
+			if devType == "" {
+				devType = "GenericHID"
+			}
+		case app >= 0x00C0 && app <= 0x00CF:
+			if devType == "" {
+				devType = "GenericWatch"
+			}
+		case app >= 0x0400 && app <= 0x040F:
+			if devType == "" {
+				devType = "GenericHeadset"
+			}
+		case app >= 0x0200 && app <= 0x023F:
+			if devType == "" {
+				devType = "GenericTag"
+			}
+		}
+	}
+
+	// 2. Apple / Bose / Garmin / SwitchBot / OMRON メーカーパケット判定
+	for _, md := range r.ManufacturerData() {
+		code := md.CompanyID
+		data := md.Data
+		switch code {
+		case 0x004c: // Apple
+			if len(data) >= 1 {
+				appleType := data[0]
+				switch appleType {
+				case 0x07:
+					devType = "AirPods"
+				case 0x09:
+					ip := parseAirPlayIP(data)
+					if ip != "" {
+						devType = fmt.Sprintf("AirPlayDevice(%s)", ip)
+					} else {
+						devType = "AirPlayDevice"
+					}
+				case 0x10:
+					if devType == "" {
+						devType = "AppleWatch"
+					}
+				case 0x12:
+					devType = "AirTag"
+				default:
+					if devType == "" {
+						devType = "AppleDevice"
+					}
+				}
+			}
+		case 0x29d4: // JVCKENWOOD Corporation (Victor / JVC / Kenwood)
+			if devType == "" {
+				devType = "VictorHeadset"
+			}
+		case 0x0059: // Nordic Semiconductor
+			if devType == "" {
+				devType = "NordicDevice"
+			}
+		case 0x0006: // Microsoft Corporation
+			if devType == "" {
+				devType = "MicrosoftCDP"
+			}
+		case 0x01a9: // Canon Inc.
+			if devType == "" {
+				devType = "CanonCamera"
+			}
+		case 0x012d: // Sony Corporation
+			if devType == "" {
+				devType = "SonyAudio"
+			}
+		case 0x1c03, 0x1d03, 0x1e04: // Bose
+			if devType == "" {
+				devType = "BoseHeadset"
+			}
+		case 0x0087: // Garmin
+			if devType == "" {
+				devType = "GarminWatch"
+			}
+		case 0x0969: // Woan Technology (SwitchBot)
+			if devType == "" || devType == "SwitchBotSensor" || devType == "GenericSensor" {
+				switch d.SBType {
+				case 0x35:
+					devType = "SwitchBotCo2"
+				case 0x77:
+					devType = "SwitchBotEnv"
+				case 0x73:
+					devType = "SwitchBotMotionSensor"
+				default:
+					if len(d.EnvData) >= 5 {
+						devType = "SwitchBotPlugMini"
+					} else {
+						devType = "SwitchBotSensor"
+					}
+				}
+			}
+		case 0x02d5: // OMRON
+			devType = "OMRONEnv"
+		}
+	}
+
+	// 2.5 Service Data による SwitchBot / Inkbird / Google 判定
+	for _, sd := range r.ServiceData() {
+		uuidStr := strings.ToLower(sd.UUID.String())
+		data := sd.Data
+		if len(data) == 6 && (strings.HasPrefix(uuidStr, "00000d00") || strings.HasPrefix(uuidStr, "0000fd3d")) {
+			if data[0] == 0x73 {
+				if devType == "" || strings.HasPrefix(devType, "Generic") || devType == "SwitchBotSensor" {
+					devType = "SwitchBotMotionSensor"
+				}
+			} else if data[0] == 0x35 {
+				if devType == "" || strings.HasPrefix(devType, "Generic") || devType == "SwitchBotSensor" {
+					devType = "SwitchBotCo2"
+				}
+			} else if data[0] == 0x77 || data[0] == 0x57 || data[0] == 0x54 {
+				if devType == "" || strings.HasPrefix(devType, "Generic") || devType == "SwitchBotSensor" {
+					devType = "SwitchBotEnv"
+				}
+			}
+		} else if strings.HasPrefix(uuidStr, "0000fff1") || strings.HasPrefix(uuidStr, "0000f100") || strings.HasPrefix(uuidStr, "0000fc1f") {
+			if devType == "" || strings.HasPrefix(devType, "Generic") {
+				devType = "InkbirdEnv"
+			}
+		} else if strings.HasPrefix(uuidStr, "0000fe2c") {
+			if devType == "" || strings.HasPrefix(devType, "Generic") {
+				devType = "GoogleFastPair"
+			}
+		} else if strings.HasPrefix(uuidStr, "0000fef3") {
+			if devType == "" || strings.HasPrefix(devType, "Generic") {
+				devType = "GoogleNearby"
+			}
+		}
+	}
+
+	// 3. SwitchBot / Inkbird / OMRON / Nordic 固有構造体判定
+	if isInkbird(d.Name) {
+		devType = "InkbirdEnv"
+	} else if devType == "" || strings.HasPrefix(devType, "Generic") {
+		if d.SBType == 0x73 {
+			devType = "SwitchBotMotionSensor"
+		} else if d.SBType == 0x35 {
+			devType = "SwitchBotCo2"
+		} else if d.SBType == 0x77 {
+			devType = "SwitchBotEnv"
+		} else if d.Code == 0x0969 {
+			if len(d.EnvData) >= 5 {
+				devType = "SwitchBotPlugMini"
+			} else {
+				devType = "SwitchBotSensor"
+			}
+		} else if d.Code == 0x012d {
+			devType = "SonyAudio"
+		} else if d.Code == 0x1c03 || d.Code == 0x1d03 || d.Code == 0x1e04 {
+			devType = "BoseHeadset"
+		} else if d.Code == 0x29d4 {
+			devType = "VictorHeadset"
+		} else if d.Code == 0x0006 {
+			devType = "MicrosoftCDP"
+		} else if d.Code == 0x01a9 {
+			devType = "CanonCamera"
+		} else if d.Code == 0x0059 {
+			devType = "NordicDevice"
+		} else if len(d.EnvData) == 8 && d.EnvData[0] == 0xf1 {
+			devType = "InkbirdEnv"
+		} else if strings.HasPrefix(d.Name, "Rbt") && len(d.EnvData) >= 18 {
+			devType = "OMRONEnv"
+		}
+	}
+
+	// 4. Service UUID による判定
+	if devType == "" {
+		if d.UUIDMap["1812"] {
+			devType = "GenericKeyboard"
+		} else if d.UUIDMap["180d"] {
+			devType = "HeartRateSensor"
+		} else if d.UUIDMap["febe"] {
+			devType = "BoseHeadset"
+		} else if d.UUIDMap["fef3"] {
+			devType = "GoogleNearby"
+		} else if d.UUIDMap["fff0"] {
+			devType = "GenericBLEAppliance"
+		}
+	}
+
+	// 5. デバイス名 (d.Name) のキーワードによる詳細判定
+	if d.Name != "" {
+		lowerName := strings.ToLower(d.Name)
+		switch {
+		// Cameras
+		case strings.Contains(lowerName, "canon") || strings.Contains(lowerName, "eos") || strings.Contains(lowerName, "powershot") || strings.Contains(lowerName, "sx740"):
+			devType = "CanonCamera"
+
+		// Audio / Headphones / Music Players
+		case strings.Contains(lowerName, "victor") || strings.Contains(lowerName, "jvc") || strings.Contains(lowerName, "kenwood") || strings.HasPrefix(lowerName, "ha-"):
+			devType = "VictorHeadset"
+		case strings.Contains(lowerName, "airpods"):
+			devType = "AirPods"
+		case strings.Contains(lowerName, "beats") || strings.Contains(lowerName, "powerbeats"):
+			devType = "BeatsHeadset"
+		case strings.Contains(lowerName, "ath-") || strings.Contains(lowerName, "ck1tw") || strings.Contains(lowerName, "tw#") || strings.Contains(lowerName, "audio-technica"):
+			devType = "AudioTechnicaHeadset"
+		case strings.Contains(lowerName, "wf-") || strings.Contains(lowerName, "wh-") || strings.Contains(lowerName, "sony") || strings.Contains(lowerName, "linkbuds") || strings.Contains(lowerName, "walkman"):
+			devType = "SonyAudio"
+		case strings.Contains(lowerName, "bose") || strings.Contains(lowerName, "quietcomfort"):
+			devType = "BoseHeadset"
+
+		// Watches
+		case strings.Contains(lowerName, "apple watch"):
+			devType = "AppleWatch"
+		case strings.Contains(lowerName, "garmin") || strings.Contains(lowerName, "forerunner") || strings.Contains(lowerName, "fenix"):
+			devType = "GarminWatch"
+		case strings.Contains(lowerName, "galaxy watch"):
+			devType = "GalaxyWatch"
+		case strings.Contains(lowerName, "fitbit") || strings.Contains(lowerName, "charge") || strings.Contains(lowerName, "sense") || strings.Contains(lowerName, "inspire"):
+			devType = "FitbitWatch"
+
+		// Keyboards
+		case (strings.Contains(lowerName, "logi") || strings.Contains(lowerName, "logitech") || strings.Contains(lowerName, "mx keys") || strings.Contains(lowerName, "k380")) && (strings.Contains(lowerName, "keyboard") || strings.Contains(lowerName, "kb") || strings.Contains(lowerName, "keys")):
+			devType = "LogitechKeyboard"
+		case strings.Contains(lowerName, "keychron"):
+			devType = "KeychronKeyboard"
+
+		// Mice
+		case (strings.Contains(lowerName, "logi") || strings.Contains(lowerName, "logitech") || strings.Contains(lowerName, "mx master") || strings.Contains(lowerName, "m590")) && (strings.Contains(lowerName, "mouse") || strings.Contains(lowerName, "trackpad")):
+			devType = "LogitechMouse"
+
+		// General Keywords (Fallback if devType is empty or generic)
+		case devType == "" && (strings.Contains(lowerName, "headphone") || strings.Contains(lowerName, "headset") || strings.Contains(lowerName, "buds")):
+			devType = "GenericHeadset"
+		case devType == "" && strings.Contains(lowerName, "watch"):
+			devType = "GenericWatch"
+		case devType == "" && (strings.Contains(lowerName, "keyboard") || strings.HasSuffix(lowerName, "kb")):
+			devType = "GenericKeyboard"
+		case devType == "" && (strings.Contains(lowerName, "mouse") || strings.Contains(lowerName, "trackpad")):
+			devType = "GenericMouse"
+		}
+	}
+
+	if devType != "" {
+		d.DeviceType = devType
+	}
+	enrichDeviceName(d)
+}
+
+func enrichDeviceName(d *BluetoothDeviceEnt) {
+	if d.DeviceType == "" {
+		return
+	}
+	tag := "[" + d.DeviceType + "]"
+	if d.Name == "" {
+		d.Name = tag
+	} else {
+		lowerName := strings.ToLower(d.Name)
+		lowerType := strings.ToLower(d.DeviceType)
+		if !strings.Contains(d.Name, tag) && !strings.Contains(lowerName, lowerType) {
+			d.Name = d.Name + " " + tag
+		}
+	}
+}
+
+func getDeviceID(d *BluetoothDeviceEnt, r bluetooth.ScanResult) string {
+	addrStr := r.Address.String()
+	if !idByName {
+		return addrStr
+	}
+	if !r.Address.IsRandom() && !isUUIDAddress(addrStr) {
+		return addrStr
+	}
+	name := d.Name
+	devType := d.DeviceType
+	if name == "" && devType == "" {
+		return addrStr
+	}
+	return fmt.Sprintf("NAME:%s:TYPE:%s", name, devType)
+}
+
+func logUnresolvedDevice(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
+	if !debug {
+		return
+	}
+	if d.DeviceType != "" && !strings.HasPrefix(d.DeviceType, "Generic") {
+		return
+	}
+
+	var mfgData []string
+	var serviceData []string
+	var appearanceStr string
+
+	app := getAppearance(r)
+	if app != 0 {
+		appearanceStr = fmt.Sprintf("0x%04x", app)
+	}
+
+	for _, md := range r.ManufacturerData() {
+		mfgData = append(mfgData, fmt.Sprintf("%04x:%x", md.CompanyID, md.Data))
+	}
+	for _, sd := range r.ServiceData() {
+		serviceData = append(serviceData, fmt.Sprintf("%s:%x", sd.UUID.String(), sd.Data))
+	}
+
+	hasValidData := (d.Name != "" && !strings.HasPrefix(d.Name, "[")) ||
+		d.Code != 0 ||
+		appearanceStr != "" ||
+		len(d.UUIDMap) > 0 ||
+		len(mfgData) > 0 ||
+		len(serviceData) > 0
+
+	if !hasValidData {
+		return
+	}
+
+	now := time.Now().Unix()
+	if now-d.LastLoggedUnresolved < 30 {
+		return
+	}
+	d.LastLoggedUnresolved = now
+
+	log.Printf("[UNRESOLVED_DEVICE] addr=%s, addrType=%s, name=%q, devType=%s, code=0x%04x, appearance=%s, uuids=%s, mfgData=[%s], serviceData=[%s]",
+		d.Address, d.AddressType, d.Name, d.DeviceType, d.Code, appearanceStr,
+		getUUID(d), strings.Join(mfgData, ";"), strings.Join(serviceData, ";"))
+}
+
+func isPrivateIP(a, b, c, d byte) bool {
+	if a == 192 && b == 168 {
+		return true
+	}
+	if a == 10 {
+		return true
+	}
+	if a == 172 && b >= 16 && b <= 31 {
+		return true
+	}
+	return false
+}
+
+func parseAirPlayIP(data []byte) string {
+	if len(data) < 4 {
+		return ""
+	}
+	for i := 0; i <= len(data)-4; i++ {
+		if isPrivateIP(data[i], data[i+1], data[i+2], data[i+3]) {
+			return fmt.Sprintf("%d.%d.%d.%d", data[i], data[i+1], data[i+2], data[i+3])
+		}
+	}
+	for i := 0; i <= len(data)-4; i++ {
+		if isPrivateIP(data[i+1], data[i+2], data[i+3], data[i]) {
+			return fmt.Sprintf("%d.%d.%d.%d", data[i+1], data[i+2], data[i+3], data[i])
+		}
+	}
+	for i := 0; i <= len(data)-4; i++ {
+		if isPrivateIP(data[i+3], data[i+2], data[i+1], data[i]) {
+			return fmt.Sprintf("%d.%d.%d.%d", data[i+3], data[i+2], data[i+1], data[i])
+		}
+	}
+	if len(data) >= 9 {
+		return fmt.Sprintf("%d.%d.%d.%d", data[5], data[6], data[7], data[8])
+	}
+	return ""
 }
