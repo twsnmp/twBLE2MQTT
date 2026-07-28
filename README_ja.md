@@ -91,6 +91,8 @@ MQTTまたはSyslogの少なくとも1つの転送先を指定する必要があ
 | `-syslog` | `TWBLE2MQTT_SYSLOG` | カンマ区切りのSyslog転送先リスト | "" |
 | `-interval` | `TWBLE2MQTT_INTERVAL` | 定期レポート送信の間隔（秒） | `600` |
 | `-all` | `TWBLE2MQTT_ALL` | すべてのアドレス（プライベート/ランダムを含む）を報告 | `false` |
+| `-sensorOnly` | `TWBLE2MQTT_SENSORONLY` | センサーのデータのみ送信（デバイス情報を送信しない） | `false` |
+| `-noDevice` | `TWBLE2MQTT_NODEVICE` | デバイス情報を送信しない | `false` |
 | `-debug` | `TWBLE2MQTT_DEBUG` | デバッグモードを有効化 | `false` |
 
 ### 環境変数

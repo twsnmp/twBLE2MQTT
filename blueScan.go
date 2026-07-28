@@ -773,26 +773,28 @@ func sendReport() {
 		if debug {
 			log.Println(d.String())
 		}
-		// General report for all devices
-		sendSyslog(d.String())
-		publishMQTT(&mqttDeviceDataEnt{
-			Time:            time.Now().Format(time.RFC3339),
-			ID:              d.ID,
-			Address:         d.Address,
-			Name:            d.Name,
-			AddressType:     d.AddressType,
-			DeviceType:      d.DeviceType,
-			AddrChangeCount: d.AddrChangeCount,
-			Info:            d.Info,
-			Vendor:          getVendor(d),
-			UUID:            getUUID(d),
-			MinRSSI:         d.MinRSSI,
-			MaxRSSI:         d.MaxRSSI,
-			RSSI:            d.RSSI,
-			Count:           d.Count,
-			FirstTime:       time.Unix(d.FirstTime, 0).Format(time.RFC3339),
-			LastTime:        time.Unix(d.LastTime, 0).Format(time.RFC3339),
-		})
+		// General report for all devices (skipped if noDevice is true)
+		if !noDevice {
+			sendSyslog(d.String())
+			publishMQTT(&mqttDeviceDataEnt{
+				Time:            time.Now().Format(time.RFC3339),
+				ID:              d.ID,
+				Address:         d.Address,
+				Name:            d.Name,
+				AddressType:     d.AddressType,
+				DeviceType:      d.DeviceType,
+				AddrChangeCount: d.AddrChangeCount,
+				Info:            d.Info,
+				Vendor:          getVendor(d),
+				UUID:            getUUID(d),
+				MinRSSI:         d.MinRSSI,
+				MaxRSSI:         d.MaxRSSI,
+				RSSI:            d.RSSI,
+				Count:           d.Count,
+				FirstTime:       time.Unix(d.FirstTime, 0).Format(time.RFC3339),
+				LastTime:        time.Unix(d.LastTime, 0).Format(time.RFC3339),
+			})
+		}
 		report++
 		return true
 	})

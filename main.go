@@ -29,6 +29,8 @@ var addrToVendor string         // Path to CSV for MAC address to vendor mapping
 var debug bool                  // Enable debug mode
 var allAddress bool              // Report all addresses (including private/random)
 var idByName bool                // Use device name and type for device ID of random address
+var sensorOnly bool              // Report sensor data only (do not report device info)
+var noDevice bool                // Do not report device info
 
 func init() {
 	// Define command line flags
@@ -44,6 +46,8 @@ func init() {
 	flag.BoolVar(&debug, "debug", false, "debug mode")
 	flag.BoolVar(&allAddress, "all", false, "report all address(include private)")
 	flag.BoolVar(&idByName, "idByName", false, "use device name and type for device ID of random address")
+	flag.BoolVar(&sensorOnly, "sensorOnly", false, "report sensor data only")
+	flag.BoolVar(&noDevice, "noDevice", false, "do not report device info")
 
 	// Override flags with environment variables if present (prefix: TWBLE2MQTT_)
 	flag.VisitAll(func(f *flag.Flag) {
@@ -63,6 +67,9 @@ func (writer logWriter) Write(bytes []byte) (int, error) {
 
 func main() {
 	flag.Parse()
+	if sensorOnly {
+		noDevice = true
+	}
 
 	// Setup logging
 	log.SetFlags(0)

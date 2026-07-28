@@ -182,3 +182,20 @@ func TestHasUUID(t *testing.T) {
 	}
 }
 
+func TestNoDeviceAndSensorOnlyFlags(t *testing.T) {
+	noDevice = false
+	sensorOnly = true
+	if sensorOnly {
+		noDevice = true
+	}
+	if !noDevice {
+		t.Errorf("expected noDevice to be true when sensorOnly is true")
+	}
+
+	noDevice = true
+	sensorOnly = false
+	if !noDevice {
+		t.Errorf("expected noDevice to be true")
+	}
+}
+

@@ -91,6 +91,8 @@ You must specify at least one destination (MQTT or Syslog).
 | `-syslog` | `TWBLE2MQTT_SYSLOG` | Comma-separated list of Syslog destinations | "" |
 | `-interval` | `TWBLE2MQTT_INTERVAL` | Interval for sending periodic reports (seconds) | `600` |
 | `-all` | `TWBLE2MQTT_ALL` | Report all addresses (including private/random) | `false` |
+| `-sensorOnly` | `TWBLE2MQTT_SENSORONLY` | Send sensor data only (do not report device info) | `false` |
+| `-noDevice` | `TWBLE2MQTT_NODEVICE` | Do not report device info | `false` |
 | `-debug` | `TWBLE2MQTT_DEBUG` | Enable debug mode | `false` |
 
 ### Environment Variables
