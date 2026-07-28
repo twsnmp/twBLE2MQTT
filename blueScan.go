@@ -849,6 +849,25 @@ func getAppearance(r bluetooth.ScanResult) uint16 {
 	return 0
 }
 
+// hasUUID checks if a target 16-bit or 128-bit UUID exists in d.UUIDMap.
+func hasUUID(d *BluetoothDeviceEnt, target string) bool {
+	target = strings.ToLower(target)
+	for u := range d.UUIDMap {
+		uLower := strings.ToLower(u)
+		if uLower == target {
+			return true
+		}
+		if len(target) == 4 {
+			if strings.HasPrefix(uLower, "0000"+target) || strings.Contains(uLower, target) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// estimateDeviceType tries to identify the device type based on
+// Appearance, Manufacturer Data, Service Data, Service UUIDs, and LocalName.
 func estimateDeviceType(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 	devType := d.DeviceType
 
@@ -997,7 +1016,7 @@ func estimateDeviceType(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 			if devType == "" || strings.HasPrefix(devType, "Generic") {
 				devType = "GoogleFastPair"
 			}
-		} else if strings.HasPrefix(uuidStr, "0000fef3") {
+		} else if strings.HasPrefix(uuidStr, "0000fef3") || strings.HasPrefix(uuidStr, "0000fcf1") {
 			if devType == "" || strings.HasPrefix(devType, "Generic") {
 				devType = "GoogleNearby"
 			}
@@ -1041,15 +1060,15 @@ func estimateDeviceType(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 
 	// 4. Service UUID による判定
 	if devType == "" {
-		if d.UUIDMap["1812"] {
+		if hasUUID(d, "1812") {
 			devType = "GenericKeyboard"
-		} else if d.UUIDMap["180d"] {
+		} else if hasUUID(d, "180d") {
 			devType = "HeartRateSensor"
-		} else if d.UUIDMap["febe"] {
+		} else if hasUUID(d, "febe") {
 			devType = "BoseHeadset"
-		} else if d.UUIDMap["fef3"] {
+		} else if hasUUID(d, "fef3") || hasUUID(d, "fcf1") {
 			devType = "GoogleNearby"
-		} else if d.UUIDMap["fff0"] {
+		} else if hasUUID(d, "fff0") {
 			devType = "GenericBLEAppliance"
 		}
 	}

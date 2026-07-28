@@ -163,3 +163,22 @@ func TestAddressChangeCount(t *testing.T) {
 		t.Errorf("expected ID %s, got %s", devID, d.ID)
 	}
 }
+
+func TestHasUUID(t *testing.T) {
+	d := &BluetoothDeviceEnt{
+		UUIDMap: map[string]bool{
+			"0000fff0-0000-1000-8000-00805f9b34fb": true,
+			"0000fcf1-0000-1000-8000-00805f9b34fb": true,
+		},
+	}
+	if !hasUUID(d, "fff0") {
+		t.Errorf("expected hasUUID(d, 'fff0') to be true")
+	}
+	if !hasUUID(d, "fcf1") {
+		t.Errorf("expected hasUUID(d, 'fcf1') to be true")
+	}
+	if hasUUID(d, "180d") {
+		t.Errorf("expected hasUUID(d, '180d') to be false")
+	}
+}
+
