@@ -46,6 +46,7 @@ func (d *BluetoothDeviceEnt) String() string {
 }
 
 var deviceMap sync.Map // Map of MAC address to *BluetoothDeviceEnt
+var macToIDMap sync.Map
 var total = 0          // Total number of scan results processed
 var skip = 0           // Number of scan results skipped due to invalid RSSI
 
@@ -105,99 +106,104 @@ func checkBlueDevice(r bluetooth.ScanResult) {
 	}
 	total++
 	now := time.Now().Unix()
+	mac := r.Address.String()
 
-	dTemp := &BluetoothDeviceEnt{
-		UUIDMap: make(map[string]bool),
-	}
-	setAddrType(dTemp, r.Address)
-	checkDeviceInfo(dTemp, r)
-	estimateDeviceType(dTemp, r)
+	var targetID string
+	var d *BluetoothDeviceEnt
 
-	id := getDeviceID(dTemp, r)
-	currentAddr := r.Address.String()
-
-	if v, ok := deviceMap.Load(id); ok {
-		if d, ok := v.(*BluetoothDeviceEnt); ok {
-			d.RSSI = rssi
-			if d.RSSI > d.MaxRSSI {
-				d.MaxRSSI = d.RSSI
+	// 1. macToIDMap から現在の Device ID を取得してルックアップ
+	if idVal, ok := macToIDMap.Load(mac); ok {
+		if idStr, ok := idVal.(string); ok {
+			if v, ok := deviceMap.Load(idStr); ok {
+				if ent, ok := v.(*BluetoothDeviceEnt); ok {
+					d = ent
+					targetID = idStr
+				}
 			}
-			if d.RSSI < d.MinRSSI {
-				d.MinRSSI = d.RSSI
-			}
-			checkDeviceInfo(d, r)
-			estimateDeviceType(d, r)
-			if d.Address != currentAddr {
-				d.Address = currentAddr
-				d.AddrChangeCount++
-				setAddrType(d, r.Address)
-			}
-			d.Count++
-			d.LastTime = now
-			logUnresolvedDevice(d, r)
-			return
-		} else {
-			deviceMap.Delete(id)
 		}
 	}
 
-	// id で見つからない場合、フォールバックの MAC アドレスキーで登録されているエントリがないか検索
-	if currentAddr != id {
-		if v, ok := deviceMap.Load(currentAddr); ok {
-			if d, ok := v.(*BluetoothDeviceEnt); ok {
-				d.RSSI = rssi
-				if d.RSSI > d.MaxRSSI {
-					d.MaxRSSI = d.RSSI
-				}
-				if d.RSSI < d.MinRSSI {
-					d.MinRSSI = d.RSSI
-				}
-				checkDeviceInfo(d, r)
-				estimateDeviceType(d, r)
-				d.Count++
-				d.LastTime = now
+	// 2. macToIDMap で見つからない場合、一時的なデータからの ID または MAC アドレスで検索
+	if d == nil {
+		dTemp := &BluetoothDeviceEnt{
+			Address: mac,
+			UUIDMap: make(map[string]bool),
+		}
+		setAddrType(dTemp, r.Address)
+		checkDeviceInfo(dTemp, r)
+		estimateDeviceType(dTemp, r)
 
-				newID := getDeviceID(d, r)
-				if newID != currentAddr {
-					deviceMap.Delete(currentAddr)
-					d.ID = newID
-					d.Address = currentAddr
-					if existV, loaded := deviceMap.LoadOrStore(newID, d); loaded {
-						if existD, ok := existV.(*BluetoothDeviceEnt); ok {
-							existD.Count += d.Count
-							existD.LastTime = now
-							if d.RSSI > existD.MaxRSSI {
-								existD.MaxRSSI = d.RSSI
-							}
-							if d.RSSI < existD.MinRSSI {
-								existD.MinRSSI = d.RSSI
-							}
-							if existD.Address != currentAddr {
-								existD.Address = currentAddr
-								existD.AddrChangeCount++
-								setAddrType(existD, r.Address)
-							}
-							if existD.Name == "" || strings.HasPrefix(existD.Name, "[") {
-								existD.Name = d.Name
-							}
-							logUnresolvedDevice(existD, r)
-						}
-					} else {
-						logUnresolvedDevice(d, r)
+		tempID := getDeviceID(dTemp, r)
+		if v, ok := deviceMap.Load(tempID); ok {
+			if ent, ok := v.(*BluetoothDeviceEnt); ok {
+				d = ent
+				targetID = tempID
+			}
+		} else if mac != tempID {
+			if v, ok := deviceMap.Load(mac); ok {
+				if ent, ok := v.(*BluetoothDeviceEnt); ok {
+					d = ent
+					targetID = mac
+				}
+			}
+		}
+	}
+
+	// 3. 既存エントリが見つかった場合の更新
+	if d != nil {
+		if d.Address != mac {
+			d.Address = mac
+			d.AddrChangeCount++
+			setAddrType(d, r.Address)
+		}
+		d.RSSI = rssi
+		if d.RSSI > d.MaxRSSI {
+			d.MaxRSSI = d.RSSI
+		}
+		if d.RSSI < d.MinRSSI {
+			d.MinRSSI = d.RSSI
+		}
+		checkDeviceInfo(d, r)
+		estimateDeviceType(d, r)
+		d.Count++
+		d.LastTime = now
+
+		newID := getDeviceID(d, r)
+		if newID != targetID {
+			deviceMap.Delete(targetID)
+			d.ID = newID
+			if existV, loaded := deviceMap.LoadOrStore(newID, d); loaded {
+				if existD, ok := existV.(*BluetoothDeviceEnt); ok {
+					existD.Count += d.Count
+					existD.LastTime = now
+					if d.RSSI > existD.MaxRSSI {
+						existD.MaxRSSI = d.RSSI
 					}
+					if d.RSSI < existD.MinRSSI {
+						existD.MinRSSI = d.RSSI
+					}
+					if existD.Address != mac {
+						existD.Address = mac
+						existD.AddrChangeCount++
+						setAddrType(existD, r.Address)
+					}
+					if existD.Name == "" || strings.HasPrefix(existD.Name, "[") {
+						existD.Name = d.Name
+					}
+					macToIDMap.Store(mac, newID)
+					logUnresolvedDevice(existD, r)
 					return
 				}
-				logUnresolvedDevice(d, r)
-				return
-			} else {
-				deviceMap.Delete(currentAddr)
 			}
 		}
+		macToIDMap.Store(mac, newID)
+		logUnresolvedDevice(d, r)
+		return
 	}
 
-	d := &BluetoothDeviceEnt{
-		ID:        id,
-		Address:   currentAddr,
+	// 4. 完全な新規デバイスエントリを作成
+	dNew := &BluetoothDeviceEnt{
+		Address:   mac,
 		RSSI:      rssi,
 		MinRSSI:   rssi,
 		MaxRSSI:   rssi,
@@ -206,15 +212,15 @@ func checkBlueDevice(r bluetooth.ScanResult) {
 		FirstTime: now,
 		LastTime:  now,
 	}
-	setAddrType(d, r.Address)
-	checkDeviceInfo(d, r)
-	estimateDeviceType(d, r)
+	setAddrType(dNew, r.Address)
+	checkDeviceInfo(dNew, r)
+	estimateDeviceType(dNew, r)
 
-	finalID := getDeviceID(d, r)
-	d.ID = finalID
-	d.Address = currentAddr
-	deviceMap.Store(finalID, d)
-	logUnresolvedDevice(d, r)
+	finalID := getDeviceID(dNew, r)
+	dNew.ID = finalID
+	deviceMap.Store(finalID, dNew)
+	macToIDMap.Store(mac, finalID)
+	logUnresolvedDevice(dNew, r)
 }
 
 // getVendor returns the vendor name based on manufacturer code or MAC address.
@@ -680,7 +686,13 @@ func sendInkbirdEnv(d *BluetoothDeviceEnt) {
 // sendMotionSensor sends motion sensor events via Syslog/MQTT.
 func sendMotionSensor(ms *MotionSensorEnt, event string) {
 	var d *BluetoothDeviceEnt
-	if v, ok := deviceMap.Load(ms.Address); !ok {
+	id := ms.Address
+	if idVal, ok := macToIDMap.Load(ms.Address); ok {
+		if idStr, ok := idVal.(string); ok {
+			id = idStr
+		}
+	}
+	if v, ok := deviceMap.Load(id); !ok {
 		return
 	} else {
 		if d, ok = v.(*BluetoothDeviceEnt); !ok {

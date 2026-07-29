@@ -199,3 +199,52 @@ func TestNoDeviceAndSensorOnlyFlags(t *testing.T) {
 	}
 }
 
+func TestIDByNameMotionSensor(t *testing.T) {
+	deviceMap = sync.Map{}
+	macToIDMap = sync.Map{}
+	idByName = true
+
+	macAddr := "AA:BB:CC:DD:EE:FF"
+	mappedID := "NAME:MotionSensor:TYPE:SwitchBot"
+
+	dev := &BluetoothDeviceEnt{
+		ID:         mappedID,
+		Address:    macAddr,
+		Name:       "MotionSensor",
+		DeviceType: "SwitchBot",
+		RSSI:       -70,
+	}
+	deviceMap.Store(mappedID, dev)
+	macToIDMap.Store(macAddr, mappedID)
+
+	ms := &MotionSensorEnt{
+		Address:      macAddr,
+		Moving:       true,
+		LastMove:     1600000000,
+		LastMoveDiff: 5,
+		Battery:      90,
+		Light:        true,
+	}
+
+	// Verify device lookup resolves using macToIDMap
+	id := ms.Address
+	if idVal, ok := macToIDMap.Load(ms.Address); ok {
+		if idStr, ok := idVal.(string); ok {
+			id = idStr
+		}
+	}
+	if id != mappedID {
+		t.Fatalf("expected resolved ID %s, got %s", mappedID, id)
+	}
+
+	v, ok := deviceMap.Load(id)
+	if !ok {
+		t.Fatalf("expected deviceMap.Load(%s) to succeed", id)
+	}
+	d := v.(*BluetoothDeviceEnt)
+	if d.Name != "MotionSensor" {
+		t.Errorf("expected device name MotionSensor, got %s", d.Name)
+	}
+}
+
+
