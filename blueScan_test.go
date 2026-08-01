@@ -2,8 +2,11 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
+
+	"tinygo.org/x/bluetooth"
 )
 
 type mockAddress struct {
@@ -201,7 +204,7 @@ func TestNoDeviceAndSensorOnlyFlags(t *testing.T) {
 
 func TestIDByNameMotionSensor(t *testing.T) {
 	deviceMap = sync.Map{}
-	macToIDMap = sync.Map{}
+	macToDeviceMap = sync.Map{}
 	idByName = true
 
 	macAddr := "AA:BB:CC:DD:EE:FF"
@@ -210,12 +213,13 @@ func TestIDByNameMotionSensor(t *testing.T) {
 	dev := &BluetoothDeviceEnt{
 		ID:         mappedID,
 		Address:    macAddr,
+		RawAddress: macAddr,
 		Name:       "MotionSensor",
 		DeviceType: "SwitchBot",
 		RSSI:       -70,
 	}
 	deviceMap.Store(mappedID, dev)
-	macToIDMap.Store(macAddr, mappedID)
+	macToDeviceMap.Store(macAddr, dev)
 
 	ms := &MotionSensorEnt{
 		Address:      macAddr,
@@ -226,25 +230,186 @@ func TestIDByNameMotionSensor(t *testing.T) {
 		Light:        true,
 	}
 
-	// Verify device lookup resolves using macToIDMap
-	id := ms.Address
-	if idVal, ok := macToIDMap.Load(ms.Address); ok {
-		if idStr, ok := idVal.(string); ok {
-			id = idStr
-		}
-	}
-	if id != mappedID {
-		t.Fatalf("expected resolved ID %s, got %s", mappedID, id)
-	}
-
-	v, ok := deviceMap.Load(id)
+	v, ok := macToDeviceMap.Load(ms.Address)
 	if !ok {
-		t.Fatalf("expected deviceMap.Load(%s) to succeed", id)
+		t.Fatalf("expected macToDeviceMap.Load(%s) to succeed", ms.Address)
 	}
 	d := v.(*BluetoothDeviceEnt)
 	if d.Name != "MotionSensor" {
 		t.Errorf("expected device name MotionSensor, got %s", d.Name)
 	}
 }
+
+type mockPayload struct {
+	localName        string
+	manufacturerData []bluetooth.ManufacturerDataElement
+	serviceData      []bluetooth.ServiceDataElement
+	bytes            []byte
+}
+
+func (m mockPayload) LocalName() string {
+	return m.localName
+}
+func (m mockPayload) HasServiceUUID(u bluetooth.UUID) bool {
+	return false
+}
+func (m mockPayload) ServiceUUIDs() []bluetooth.UUID {
+	return nil
+}
+func (m mockPayload) Bytes() []byte {
+	return m.bytes
+}
+func (m mockPayload) ManufacturerData() []bluetooth.ManufacturerDataElement {
+	return m.manufacturerData
+}
+func (m mockPayload) ServiceData() []bluetooth.ServiceDataElement {
+	return m.serviceData
+}
+
+func TestIDByNameSensorData(t *testing.T) {
+	deviceMap.Range(func(k, v interface{}) bool {
+		deviceMap.Delete(k)
+		return true
+	})
+	macToDeviceMap.Range(func(k, v interface{}) bool {
+		macToDeviceMap.Delete(k)
+		return true
+	})
+
+	idByName = true
+	sensorOnly = false
+	lastSendTime = 0
+
+	var randAddr bluetooth.Address
+	randAddr.Set("4a123456-7890-4000-8000-1234567890ab")
+	randAddr.SetRandom(true)
+
+	// Step 1: Scan Response packet with device name "IBS-TH1"
+	rScanRsp := bluetooth.ScanResult{
+		Address:              randAddr,
+		RSSI:                 -60,
+		AdvertisementPayload: mockPayload{localName: "IBS-TH1"},
+	}
+	checkBlueDevice(rScanRsp)
+
+	var foundID string
+	deviceMap.Range(func(k, v interface{}) bool {
+		foundID = k.(string)
+		return true
+	})
+	if !strings.HasPrefix(foundID, "NAME:IBS-TH1") {
+		t.Fatalf("expected ID starting with NAME:IBS-TH1, got %q", foundID)
+	}
+
+	// Step 2: Advertising packet containing Inkbird Env Data
+	rAdv := bluetooth.ScanResult{
+		Address: randAddr,
+		RSSI:    -58,
+		AdvertisementPayload: mockPayload{
+			serviceData: []bluetooth.ServiceDataElement{
+				{
+					UUID: bluetooth.New16BitUUID(0xfff1),
+					Data: []byte{0x09, 0x88, 0x13, 0x00, 0x00, 0x00},
+				},
+			},
+		},
+	}
+	checkBlueDevice(rAdv)
+
+	entryCount := 0
+	var ent *BluetoothDeviceEnt
+	deviceMap.Range(func(k, v interface{}) bool {
+		entryCount++
+		ent = v.(*BluetoothDeviceEnt)
+		return true
+	})
+	if entryCount != 1 {
+		t.Fatalf("expected 1 integrated device entry, got %d", entryCount)
+	}
+
+	if !strings.HasPrefix(ent.Address, "NAME:IBS-TH1") {
+		t.Errorf("expected Persistent ID Address starting with NAME:IBS-TH1 under idByName mode, got %q", ent.Address)
+	}
+	if ent.RawAddress != "4a123456-7890-4000-8000-1234567890ab" {
+		t.Errorf("expected RawAddress '4a123456-7890-4000-8000-1234567890ab', got %q", ent.RawAddress)
+	}
+	if len(ent.EnvData) == 0 {
+		t.Errorf("expected EnvData to be updated from ADV packet, but it was empty")
+	}
+
+	sendReport()
+}
+
+func TestSwitchBotEnvNotPlugMini(t *testing.T) {
+	deviceMap.Range(func(k, v interface{}) bool {
+		deviceMap.Delete(k)
+		return true
+	})
+	macToDeviceMap.Range(func(k, v interface{}) bool {
+		macToDeviceMap.Delete(k)
+		return true
+	})
+
+	idByName = true
+	sensorOnly = false
+	lastSendTime = 0
+
+	var randAddr bluetooth.Address
+	randAddr.Set("4A:99:88:77:66:55")
+	randAddr.SetRandom(true)
+
+	// Step 1: Manufacturer specific packet (0x0969)
+	rMfg := bluetooth.ScanResult{
+		Address: randAddr,
+		RSSI:    -70,
+		AdvertisementPayload: mockPayload{
+			manufacturerData: []bluetooth.ManufacturerDataElement{
+				{
+					CompanyID: 0x0969,
+					Data:      []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c},
+				},
+			},
+		},
+	}
+	checkBlueDevice(rMfg)
+
+	var ent *BluetoothDeviceEnt
+	deviceMap.Range(func(k, v interface{}) bool {
+		ent = v.(*BluetoothDeviceEnt)
+		return true
+	})
+	if ent.DeviceType == "SwitchBotPlugMini" {
+		t.Fatalf("expected device not to be misidentified as SwitchBotPlugMini, got %q", ent.DeviceType)
+	}
+
+	// Step 2: Receive 8-byte EnvData (0x00 0x0d 0x54 ...)
+	rEnv := bluetooth.ScanResult{
+		Address: randAddr,
+		RSSI:    -70,
+		AdvertisementPayload: mockPayload{
+			serviceData: []bluetooth.ServiceDataElement{
+				{
+					UUID: bluetooth.New16BitUUID(0x0d00),
+					Data: []byte{0x00, 0x0d, 0x54, 0x10, 0x64, 0x07, 0x9a, 0x46},
+				},
+			},
+		},
+	}
+	checkBlueDevice(rEnv)
+
+	if ent.DeviceType != "SwitchBotEnv" {
+		t.Errorf("expected DeviceType to be SwitchBotEnv, got %q", ent.DeviceType)
+	}
+	if !strings.Contains(ent.Address, "SwitchBotEnv") {
+		t.Errorf("expected Persistent Address to contain SwitchBotEnv, got %q", ent.Address)
+	}
+
+	// Step 3: Receive 0x0969 again and ensure EnvData (8 bytes) is preserved
+	checkBlueDevice(rMfg)
+	if len(ent.EnvData) != 8 {
+		t.Errorf("expected 8-byte EnvData to be preserved, got len=%d", len(ent.EnvData))
+	}
+}
+
 
 

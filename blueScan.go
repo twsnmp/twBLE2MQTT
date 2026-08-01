@@ -15,7 +15,8 @@ import (
 // BluetoothDeviceEnt represents a discovered Bluetooth device and its metadata.
 type BluetoothDeviceEnt struct {
 	ID                   string          // Unique ID (MAC address or NAME:...:TYPE:... if idByName)
-	Address              string          // MAC address (last seen MAC)
+	Address              string          // MAC address or persistent ID if idByName
+	RawAddress           string          // Actual MAC address or UUID
 	AddressType          string          // public or random
 	DeviceType           string          // Estimated device type
 	AddrChangeCount      int             // Number of times address changed for this device ID
@@ -46,9 +47,9 @@ func (d *BluetoothDeviceEnt) String() string {
 }
 
 var deviceMap sync.Map // Map of MAC address to *BluetoothDeviceEnt
-var macToIDMap sync.Map
-var total = 0          // Total number of scan results processed
-var skip = 0           // Number of scan results skipped due to invalid RSSI
+var macToDeviceMap sync.Map
+var total = 0 // Total number of scan results processed
+var skip = 0  // Number of scan results skipped due to invalid RSSI
 
 // MotionSensorEnt represents a SwitchBot motion sensor state.
 type MotionSensorEnt struct {
@@ -108,26 +109,23 @@ func checkBlueDevice(r bluetooth.ScanResult) {
 	now := time.Now().Unix()
 	mac := r.Address.String()
 
-	var targetID string
 	var d *BluetoothDeviceEnt
+	var oldID string
 
-	// 1. macToIDMap から現在の Device ID を取得してルックアップ
-	if idVal, ok := macToIDMap.Load(mac); ok {
-		if idStr, ok := idVal.(string); ok {
-			if v, ok := deviceMap.Load(idStr); ok {
-				if ent, ok := v.(*BluetoothDeviceEnt); ok {
-					d = ent
-					targetID = idStr
-				}
-			}
+	// 1. 実 MAC アドレスから既存のエントリを検索
+	if v, ok := macToDeviceMap.Load(mac); ok {
+		if ent, ok := v.(*BluetoothDeviceEnt); ok {
+			d = ent
+			oldID = d.ID
 		}
 	}
 
-	// 2. macToIDMap で見つからない場合、一時的なデータからの ID または MAC アドレスで検索
+	// 2. macToDeviceMap で見つからない場合、一時的なパース情報から Persistent ID または MAC アドレスで検索
 	if d == nil {
 		dTemp := &BluetoothDeviceEnt{
-			Address: mac,
-			UUIDMap: make(map[string]bool),
+			Address:    mac,
+			RawAddress: mac,
+			UUIDMap:    make(map[string]bool),
 		}
 		setAddrType(dTemp, r.Address)
 		checkDeviceInfo(dTemp, r)
@@ -137,13 +135,13 @@ func checkBlueDevice(r bluetooth.ScanResult) {
 		if v, ok := deviceMap.Load(tempID); ok {
 			if ent, ok := v.(*BluetoothDeviceEnt); ok {
 				d = ent
-				targetID = tempID
+				oldID = d.ID
 			}
 		} else if mac != tempID {
 			if v, ok := deviceMap.Load(mac); ok {
 				if ent, ok := v.(*BluetoothDeviceEnt); ok {
 					d = ent
-					targetID = mac
+					oldID = d.ID
 				}
 			}
 		}
@@ -151,11 +149,7 @@ func checkBlueDevice(r bluetooth.ScanResult) {
 
 	// 3. 既存エントリが見つかった場合の更新
 	if d != nil {
-		if d.Address != mac {
-			d.Address = mac
-			d.AddrChangeCount++
-			setAddrType(d, r.Address)
-		}
+		d.RawAddress = mac
 		d.RSSI = rssi
 		if d.RSSI > d.MaxRSSI {
 			d.MaxRSSI = d.RSSI
@@ -169,8 +163,21 @@ func checkBlueDevice(r bluetooth.ScanResult) {
 		d.LastTime = now
 
 		newID := getDeviceID(d, r)
-		if newID != targetID {
-			deviceMap.Delete(targetID)
+		isFixed := !r.Address.IsRandom() && !isUUIDAddress(mac)
+		if idByName && !isFixed {
+			d.Address = newID
+		} else {
+			if d.Address != mac {
+				d.Address = mac
+				d.AddrChangeCount++
+				setAddrType(d, r.Address)
+			}
+		}
+
+		if newID != oldID {
+			if oldID != "" {
+				deviceMap.Delete(oldID)
+			}
 			d.ID = newID
 			if existV, loaded := deviceMap.LoadOrStore(newID, d); loaded {
 				if existD, ok := existV.(*BluetoothDeviceEnt); ok {
@@ -182,7 +189,7 @@ func checkBlueDevice(r bluetooth.ScanResult) {
 					if d.RSSI < existD.MinRSSI {
 						existD.MinRSSI = d.RSSI
 					}
-					if existD.Address != mac {
+					if existD.Address != mac && (!idByName || isFixed) {
 						existD.Address = mac
 						existD.AddrChangeCount++
 						setAddrType(existD, r.Address)
@@ -190,27 +197,33 @@ func checkBlueDevice(r bluetooth.ScanResult) {
 					if existD.Name == "" || strings.HasPrefix(existD.Name, "[") {
 						existD.Name = d.Name
 					}
-					macToIDMap.Store(mac, newID)
+					existD.RawAddress = mac
+					if idByName && !isFixed {
+						existD.Address = newID
+					} else {
+						existD.Address = mac
+					}
+					macToDeviceMap.Store(mac, existD)
 					logUnresolvedDevice(existD, r)
 					return
 				}
 			}
 		}
-		macToIDMap.Store(mac, newID)
+		macToDeviceMap.Store(mac, d)
 		logUnresolvedDevice(d, r)
 		return
 	}
 
 	// 4. 完全な新規デバイスエントリを作成
 	dNew := &BluetoothDeviceEnt{
-		Address:   mac,
-		RSSI:      rssi,
-		MinRSSI:   rssi,
-		MaxRSSI:   rssi,
-		Count:     1,
-		UUIDMap:   make(map[string]bool),
-		FirstTime: now,
-		LastTime:  now,
+		RawAddress: mac,
+		RSSI:       rssi,
+		MinRSSI:    rssi,
+		MaxRSSI:    rssi,
+		Count:      1,
+		UUIDMap:    make(map[string]bool),
+		FirstTime:  now,
+		LastTime:   now,
 	}
 	setAddrType(dNew, r.Address)
 	checkDeviceInfo(dNew, r)
@@ -218,8 +231,15 @@ func checkBlueDevice(r bluetooth.ScanResult) {
 
 	finalID := getDeviceID(dNew, r)
 	dNew.ID = finalID
+	isFixed := !r.Address.IsRandom() && !isUUIDAddress(mac)
+	if idByName && !isFixed {
+		dNew.Address = finalID
+	} else {
+		dNew.Address = mac
+	}
+
 	deviceMap.Store(finalID, dNew)
-	macToIDMap.Store(mac, finalID)
+	macToDeviceMap.Store(mac, dNew)
 	logUnresolvedDevice(dNew, r)
 }
 
@@ -230,7 +250,7 @@ func getVendor(d *BluetoothDeviceEnt) string {
 			return fmt.Sprintf("%s(0x%04x)", v, d.Code)
 		}
 	}
-	return getVendorFromAddress(d.Address)
+	return getVendorFromAddress(d.RawAddress)
 }
 
 // checkDeviceInfo parses scan result data (LocalName, UUIDs, ManufacturerData, ServiceData)
@@ -272,7 +292,10 @@ func checkDeviceInfo(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 			}
 		case 0x0969: // SwitchBot
 			if len(data) >= 12 {
-				d.EnvData = data[7:]
+				isEnvData := len(d.EnvData) == 8 && d.EnvData[0] == 0 && d.EnvData[1] == 0x0d && d.EnvData[2] == 0x54
+				if !isEnvData {
+					d.EnvData = data[7:]
+				}
 			}
 		case 0x004c, 0x0006: // Apple, Microsoft (ignore)
 		case 0x1c03, 0x1d03: // (ignore)
@@ -686,13 +709,7 @@ func sendInkbirdEnv(d *BluetoothDeviceEnt) {
 // sendMotionSensor sends motion sensor events via Syslog/MQTT.
 func sendMotionSensor(ms *MotionSensorEnt, event string) {
 	var d *BluetoothDeviceEnt
-	id := ms.Address
-	if idVal, ok := macToIDMap.Load(ms.Address); ok {
-		if idStr, ok := idVal.(string); ok {
-			id = idStr
-		}
-	}
-	if v, ok := deviceMap.Load(id); !ok {
+	if v, ok := macToDeviceMap.Load(ms.Address); !ok {
 		return
 	} else {
 		if d, ok = v.(*BluetoothDeviceEnt); !ok {
@@ -745,6 +762,9 @@ func sendReport() {
 		// Cleanup old or unimportant devices
 		if (!important && d.LastTime < now-15*60+10) || d.LastTime < now-60*60*48 {
 			deviceMap.Delete(k)
+			if d.RawAddress != "" {
+				macToDeviceMap.Delete(d.RawAddress)
+			}
 			remove++
 			return true
 		}
@@ -987,14 +1007,14 @@ func estimateDeviceType(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 				switch d.SBType {
 				case 0x35:
 					devType = "SwitchBotCo2"
-				case 0x77:
+				case 0x77, 0x57, 0x54:
 					devType = "SwitchBotEnv"
 				case 0x73:
 					devType = "SwitchBotMotionSensor"
+				case 0x67, 0x6a, 0x69:
+					devType = "SwitchBotPlugMini"
 				default:
-					if len(d.EnvData) >= 5 {
-						devType = "SwitchBotPlugMini"
-					} else {
+					if devType == "" {
 						devType = "SwitchBotSensor"
 					}
 				}
@@ -1008,18 +1028,36 @@ func estimateDeviceType(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 	for _, sd := range r.ServiceData() {
 		uuidStr := strings.ToLower(sd.UUID.String())
 		data := sd.Data
-		if len(data) == 6 && (strings.HasPrefix(uuidStr, "00000d00") || strings.HasPrefix(uuidStr, "0000fd3d")) {
-			if data[0] == 0x73 {
-				if devType == "" || strings.HasPrefix(devType, "Generic") || devType == "SwitchBotSensor" {
-					devType = "SwitchBotMotionSensor"
+		if len(data) == 8 && data[0] == 0 && data[1] == 0x0d && data[2] == 0x54 {
+			d.EnvData = data[:]
+			if devType == "" || strings.HasPrefix(devType, "Generic") || devType == "SwitchBotSensor" || devType == "SwitchBotPlugMini" {
+				devType = "SwitchBotEnv"
+			}
+		} else if len(data) >= 3 && (strings.HasPrefix(uuidStr, "00000d00") || strings.HasPrefix(uuidStr, "0000fd3d")) {
+			sbType := data[0]
+			if len(data) >= 3 && data[0] == 0x3d && data[1] == 0xfd {
+				sbType = data[2]
+			}
+			switch sbType {
+			case 0x77, 0x57, 0x54:
+				if devType == "" || strings.HasPrefix(devType, "Generic") || devType == "SwitchBotSensor" || devType == "SwitchBotPlugMini" {
+					devType = "SwitchBotEnv"
 				}
-			} else if data[0] == 0x35 {
-				if devType == "" || strings.HasPrefix(devType, "Generic") || devType == "SwitchBotSensor" {
+			case 0x35:
+				if devType == "" || strings.HasPrefix(devType, "Generic") || devType == "SwitchBotSensor" || devType == "SwitchBotPlugMini" {
 					devType = "SwitchBotCo2"
 				}
-			} else if data[0] == 0x77 || data[0] == 0x57 || data[0] == 0x54 {
+			case 0x73:
+				if devType == "" || strings.HasPrefix(devType, "Generic") || devType == "SwitchBotSensor" || devType == "SwitchBotPlugMini" {
+					devType = "SwitchBotMotionSensor"
+				}
+			case 0x67, 0x6a, 0x69:
 				if devType == "" || strings.HasPrefix(devType, "Generic") || devType == "SwitchBotSensor" {
-					devType = "SwitchBotEnv"
+					devType = "SwitchBotPlugMini"
+				}
+			default:
+				if devType == "" || strings.HasPrefix(devType, "Generic") {
+					devType = "SwitchBotSensor"
 				}
 			}
 		} else if strings.HasPrefix(uuidStr, "0000fff1") || strings.HasPrefix(uuidStr, "0000f100") || strings.HasPrefix(uuidStr, "0000fc1f") {
@@ -1045,12 +1083,12 @@ func estimateDeviceType(d *BluetoothDeviceEnt, r bluetooth.ScanResult) {
 			devType = "SwitchBotMotionSensor"
 		} else if d.SBType == 0x35 {
 			devType = "SwitchBotCo2"
-		} else if d.SBType == 0x77 {
+		} else if d.SBType == 0x77 || d.SBType == 0x57 || d.SBType == 0x54 {
 			devType = "SwitchBotEnv"
+		} else if d.SBType == 0x67 || d.SBType == 0x6a || d.SBType == 0x69 {
+			devType = "SwitchBotPlugMini"
 		} else if d.Code == 0x0969 {
-			if len(d.EnvData) >= 5 {
-				devType = "SwitchBotPlugMini"
-			} else {
+			if devType == "" || strings.HasPrefix(devType, "Generic") {
 				devType = "SwitchBotSensor"
 			}
 		} else if d.Code == 0x012d {
@@ -1152,7 +1190,7 @@ func enrichDeviceName(d *BluetoothDeviceEnt) {
 		return
 	}
 	tag := "[" + d.DeviceType + "]"
-	if d.Name == "" {
+	if d.Name == "" || strings.HasPrefix(d.Name, "[") {
 		d.Name = tag
 	} else {
 		lowerName := strings.ToLower(d.Name)

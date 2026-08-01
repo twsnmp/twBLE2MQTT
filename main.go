@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-var version = "v0.1.1"
+var version = "v0.1.2"
 var commit = ""
 
 // Command line flags and configuration variables
