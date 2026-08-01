@@ -18,7 +18,7 @@ A Bluetooth Low Energy (BLE) to MQTT gateway that discovers and decodes advertis
     | **SwitchBot** | Outdoor Meter (IP64) | Temperature, Humidity, Battery |
     | **SwitchBot** | Plug Mini | Switch State, Overload, Load (Power W) |
     | **SwitchBot** | Motion Sensor | Movement, Light Level (Bright/Dark), Battery |
-    | **Inkbird** | IBS-TH1/TH2/etc. | Temperature, Humidity, Battery, (CO2 on some models) |
+    | **Inkbird** | IBS-TH1/TH2/IAM-T1/etc. | Temperature, Humidity, Battery, Pressure, (CO2 on some models) |
     | **OMRON** | 2JCIE-BL01/BU01 | Temperature, Humidity, Light, Pressure, Noise, eTVOC, eCO2 |
 
 - **Multiple Destinations**:
